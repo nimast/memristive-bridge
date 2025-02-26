@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>E-ink Display Preview</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 100%;
+        }
+        #canvas-container {
+            border: 2px solid #666;
+            flex-shrink: 0;
+        }
+        .editor-container {
+            flex-grow: 1;
+            min-width: 300px;
+        }
+        #code-editor {
+            width: 100%;
+            height: 1000px;
+            font-family: monospace;
+            resize: none;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="canvas-container"></div>
+        <div class="editor-container">
+            <textarea id="code-editor">
+// Your drawing code here
+epdBackground(WHITE);
+
+// Draw a house
+epdRect(100, 100, 200, 150, false);    // house frame
+epdRect(150, 160, 50, 90, false);      // door
+epdRect(270, 130, 40, 40, false);      // window
+
+// Roof (triangle using lines)
+epdLine(100, 100, 200, 50);
+epdLine(200, 50, 300, 100);
+
+// Add some text
+epdText("My House", 150, 220, true);
+            </textarea>
+            <button onclick="updateSketch()">Update Preview</button>
+        </div>
+    </div>
+    <script>
+        const WHITE = 0;
+        const BLACK = 1;
+        let currentSketch = '';
+
+        // Display class simulation
+        class DisplaySimulator {
+            static point(x, y) {
+                stroke(0);
+                strokeWeight(1);
+                point(x, y);
+            }
+            
+            static line(x1, y1, x2, y2) {
+                stroke(0);
+                strokeWeight(1);
+                line(x1, y1, x2, y2);
+            }
+            
+            static rect(x, y, w, h, filled = false) {
+                stroke(0);
+                strokeWeight(1);
+                if (filled) {
+                    fill(0);
+                } else {
+                    noFill();
+                }
+                rect(x, y, w, h);
+            }
+            
+            static circle(x, y, radius, filled = false) {
+                stroke(0);
+                strokeWeight(1);
+                if (filled) {
+                    fill(0);
+                } else {
+                    noFill();
+                }
+                circle(x, y, radius);
+            }
+            
+            static text(str, x, y, large = false) {
+                noStroke();
+                fill(0);
+                textSize(large ? 16 : 12);
+                text(str, x, y);
+            }
+            
+            static background(color) {
+                background(color === WHITE ? 255 : 0);
+            }
+        }
+
+        function setup() {
+            const canvas = createCanvas(1333, 1000);
+            canvas.parent('canvas-container');
+            background(255);
+            
+            // Make Display methods globally available with 'epd' prefix
+            window.epdPoint = DisplaySimulator.point;
+            window.epdLine = DisplaySimulator.line;
+            window.epdRect = DisplaySimulator.rect;
+            window.epdCircle = DisplaySimulator.circle;
+            window.epdText = DisplaySimulator.text;
+            window.epdBackground = DisplaySimulator.background;
+            
+            updateSketch();
+        }
+
+        function draw() {
+            // P5.js requires a draw function
+        }
+
+        function updateSketch() {
+            const code = document.getElementById('code-editor').value;
+            if (code === currentSketch) return;
+            currentSketch = code;
+            
+            try {
+                clear();
+                background(255);
+                eval(code);
+            } catch (error) {
+                console.error('Error in sketch:', error);
+            }
+        }
+
+        // Auto-update preview when code changes
+        let timeout;
+        document.getElementById('code-editor').addEventListener('input', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(updateSketch, 500);
+        });
+    </script>
+</body>
+</html> 

@@ -67,9 +67,31 @@ public:
         buffer = NULL;
     }
 
+    static void drawRootLine(int x1, int y1, int x2, int y2, int thickness = 1) {
+        for(int i = 0; i < thickness; i++) {
+            Paint_DrawLine(x1, y1+i, x2, y2+i, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+        }
+    }
+
+    static void bezier(int x1, int y1, int x2, int y2, int x3, int y3, int x4, int y4) {
+        // Simple bezier curve implementation
+        for(float t = 0; t <= 1; t += 0.02) {
+            float t1 = (1-t);
+            float px = t1*t1*t1*x1 + 3*t1*t1*t*x2 + 3*t1*t*t*x3 + t*t*t*x4;
+            float py = t1*t1*t1*y1 + 3*t1*t1*t*y2 + 3*t1*t*t*y3 + t*t*t*y4;
+            
+            if(t > 0) {
+                Paint_DrawLine(prevX, prevY, px, py, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+            }
+            prevX = px;
+            prevY = py;
+        }
+    }
+
 private:
     static UBYTE* buffer;
     static UDOUBLE imageSize;
+    static float prevX, prevY;  // Add these as class members
 };
 
 // Define static members

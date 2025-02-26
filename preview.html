@@ -21,6 +21,9 @@
         .editor-container {
             flex-grow: 1;
             min-width: 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
         #code-editor {
             width: 100%;
@@ -30,12 +33,21 @@
             padding: 10px;
             box-sizing: border-box;
         }
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div id="canvas-container"></div>
         <div class="editor-container">
+            <div class="button-group">
+                <button onclick="updateSketch()">Update Preview</button>
+                <button onclick="generateRootBridgeCode()">Generate Root Bridge</button>
+                <button onclick="resetToBasicExample()">Reset to Basic Example</button>
+            </div>
             <textarea id="code-editor">
 // Your drawing code here
 epdBackground(WHITE);
@@ -52,13 +64,29 @@ epdLine(200, 50, 300, 100);
 // Add some text
 epdText("My House", 150, 220, true);
             </textarea>
-            <button onclick="updateSketch()">Update Preview</button>
         </div>
     </div>
     <script>
         const WHITE = 0;
         const BLACK = 1;
         let currentSketch = '';
+
+        // Constants for root bridge
+        const NUM_ROOTS = 10;
+        const MAX_POINTS_PER_ROOT = 20;
+        const ATTRACTION_RADIUS = 30;
+
+        class Root {
+            constructor(startX, startY, dirX, dirY) {
+                this.points = [{x: startX, y: startY}];
+                this.growing = true;
+                this.direction = {x: dirX, y: dirY};
+                this.thickness = random(1, 3);
+            }
+        }
+
+        let roots = [];
+        let leftBankHeight, rightBankHeight;
 
         // Display class simulation
         class DisplaySimulator {
@@ -124,6 +152,104 @@ epdText("My House", 150, 220, true);
             updateSketch();
         }
 
+        function initializeRootBridge() {
+            roots = [];
+            leftBankHeight = 400;
+            rightBankHeight = 400;
+
+            for(let i = 0; i < NUM_ROOTS; i++) {
+                if(i % 2 === 0) {
+                    roots.push(new Root(150, leftBankHeight, 0.8, -0.2));
+                } else {
+                    roots.push(new Root(650, rightBankHeight, -0.8, -0.2));
+                }
+            }
+        }
+
+        function drawRootBridge() {
+            clear();
+            epdBackground(WHITE);
+            
+            // Draw banks
+            epdRect(0, leftBankHeight, 150, 1000-leftBankHeight, true);
+            epdRect(650, rightBankHeight, 1333-650, 1000-rightBankHeight, true);
+            
+            initializeRootBridge();
+
+            // Grow roots for several iterations
+            for(let step = 0; step < 50; step++) {
+                for(let root of roots) {
+                    if(!root.growing) continue;
+                    
+                    let lastPoint = root.points[root.points.length - 1];
+                    
+                    // Add some randomness to direction
+                    let noise = random(-0.2, 0.2);
+                    root.direction.x += noise;
+                    root.direction.y += noise;
+                    
+                    // Normalize direction
+                    let len = sqrt(root.direction.x * root.direction.x + 
+                                 root.direction.y * root.direction.y);
+                    root.direction.x /= len;
+                    root.direction.y /= len;
+                    
+                    // Add new point
+                    let newPoint = {
+                        x: lastPoint.x + root.direction.x * 15,
+                        y: lastPoint.y + root.direction.y * 15
+                    };
+                    
+                    // Check for connections with other roots
+                    for(let otherRoot of roots) {
+                        if(otherRoot === root) continue;
+                        
+                        for(let point of otherRoot.points) {
+                            let dx = newPoint.x - point.x;
+                            let dy = newPoint.y - point.y;
+                            let dist = sqrt(dx*dx + dy*dy);
+                            
+                            if(dist < ATTRACTION_RADIUS) {
+                                // Draw connection
+                                epdLine(newPoint.x, newPoint.y, point.x, point.y);
+                                root.growing = false;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Add point and draw
+                    root.points.push(newPoint);
+                    epdLine(lastPoint.x, lastPoint.y, newPoint.x, newPoint.y);
+                    
+                    // Stop if reached other side or too many points
+                    if((root.direction.x > 0 && newPoint.x > 650) || 
+                       (root.direction.x < 0 && newPoint.x < 150) ||
+                       root.points.length > MAX_POINTS_PER_ROOT) {
+                        root.growing = false;
+                    }
+                }
+            }
+        }
+
+        function resetToBasicExample() {
+            document.getElementById('code-editor').value = `// Your drawing code here
+epdBackground(WHITE);
+
+// Draw a house
+epdRect(100, 100, 200, 150, false);    // house frame
+epdRect(150, 160, 50, 90, false);      // door
+epdRect(270, 130, 40, 40, false);      // window
+
+// Roof (triangle using lines)
+epdLine(100, 100, 200, 50);
+epdLine(200, 50, 300, 100);
+
+// Add some text
+epdText("My House", 150, 220, true);`;
+            updateSketch();
+        }
+
         function draw() {
             // P5.js requires a draw function
         }
@@ -148,6 +274,186 @@ epdText("My House", 150, 220, true);
             clearTimeout(timeout);
             timeout = setTimeout(updateSketch, 500);
         });
+
+        function generateRootBridgeCode() {
+            let code = `// Root Bridge Generation with Trees
+epdBackground(WHITE);
+
+// Constants for bridge geometry
+const BRIDGE_GAP = 500;  // Distance between banks
+const START_LEFT = 150;
+const START_RIGHT = 650;
+const START_Y = 400;
+
+// L-system tree function
+function drawTree(x, y, len, angle, depth) {
+    if (depth <= 0) return;
+    
+    let endX = x + len * Math.cos(angle);
+    let endY = y + len * Math.sin(angle);
+    epdLine(x, y, endX, endY);
+    
+    if (depth > 1) {
+        let newLen = len * 0.7;
+        drawTree(endX, endY, newLen, angle - 0.5, depth - 1);
+        drawTree(endX, endY, newLen, angle + 0.5, depth - 1);
+    }
+}
+
+// Draw banks
+epdRect(0, START_Y, START_LEFT, 600, true);    // left bank
+epdRect(START_RIGHT, START_Y, 683, 600, true);  // right bank
+
+// Draw trees on banks
+for(let i = 0; i < 5; i++) {
+    drawTree(20 + i * 30, START_Y, 40, -Math.PI/2, 4);
+}
+for(let i = 0; i < 5; i++) {
+    drawTree(670 + i * 30, START_Y, 40, -Math.PI/2, 4);
+}
+
+// Initialize roots with better targeting
+const roots = [`;
+
+        // Generate initial root positions with improved targeting
+        const NUM_ROOTS = 8;
+        for(let i = 0; i < NUM_ROOTS; i++) {
+            let targetY = 300 + (i * 25); // Higher target for better arc
+            if(i % 2 === 0) {
+                code += `
+    {x: START_LEFT, y: START_Y, dirX: 0.9, dirY: -0.4, targetX: START_RIGHT, targetY: ${targetY}, thickness: ${2 + (i % 3)}, side: "left"},  // left root ${i}`;
+            } else {
+                code += `
+    {x: START_RIGHT, y: START_Y, dirX: -0.9, dirY: -0.4, targetX: START_LEFT, targetY: ${targetY}, thickness: ${2 + (i % 3)}, side: "right"},  // right root ${i}`;
+            }
+        }
+        code += `
+];
+
+// Grow and connect roots
+let growing = new Array(${NUM_ROOTS}).fill(true);
+let points = roots.map(root => [{x: root.x, y: root.y}]);
+let connected = new Array(${NUM_ROOTS}).fill(false);
+
+// Simulate growth with improved parameters
+const MAX_STEPS = 200;  // Increased maximum steps
+let anyGrowing = true;
+
+for(let step = 0; step < MAX_STEPS && anyGrowing; step++) {
+    anyGrowing = false;
+    
+    for(let i = 0; i < roots.length; i++) {
+        if(!growing[i] || connected[i]) continue;
+        
+        anyGrowing = true;
+        let root = roots[i];
+        let lastPoint = points[i][points[i].length - 1];
+        
+        // Calculate direction to target
+        let dx = root.targetX - lastPoint.x;
+        let dy = root.targetY - lastPoint.y;
+        let distToTarget = Math.sqrt(dx*dx + dy*dy);
+        
+        // Stronger influence towards target
+        let targetInfluence = 0.3;
+        let newDirX = (1 - targetInfluence) * root.dirX + targetInfluence * (dx / distToTarget);
+        let newDirY = (1 - targetInfluence) * root.dirY + targetInfluence * (dy / distToTarget);
+        
+        // Add slight upward bias for better arching
+        newDirY -= 0.1;
+        
+        // Add small random variation
+        newDirX += random(-0.05, 0.05);
+        newDirY += random(-0.05, 0.05);
+        
+        // Normalize direction
+        let len = Math.sqrt(newDirX * newDirX + newDirY * newDirY);
+        root.dirX = newDirX / len;
+        root.dirY = newDirY / len;
+        
+        // Calculate new point
+        let stepLength = 15;
+        let newPoint = {
+            x: lastPoint.x + root.dirX * stepLength,
+            y: lastPoint.y + root.dirY * stepLength
+        };
+        
+        // Draw line segment with root thickness
+        for(let t = 0; t < root.thickness; t++) {
+            epdLine(
+                lastPoint.x, 
+                lastPoint.y + t, 
+                newPoint.x, 
+                newPoint.y + t
+            );
+        }
+        
+        // Check for connections with other roots
+        for(let j = 0; j < roots.length; j++) {
+            if(i === j || root.side === roots[j].side) continue;  // Skip same side roots
+            
+            for(let point of points[j]) {
+                let connDx = newPoint.x - point.x;
+                let connDy = newPoint.y - point.y;
+                let dist = Math.sqrt(connDx*connDx + connDy*connDy);
+                
+                if(dist < 40) {  // Connection radius
+                    // Draw thicker connection
+                    let connThickness = Math.max(root.thickness, roots[j].thickness);
+                    for(let t = 0; t < connThickness; t++) {
+                        epdLine(
+                            newPoint.x, 
+                            newPoint.y + t, 
+                            point.x, 
+                            point.y + t
+                        );
+                    }
+                    connected[i] = true;
+                    connected[j] = true;
+                    growing[i] = false;
+                    break;
+                }
+            }
+            if(connected[i]) break;
+        }
+        
+        // Add point to array if still growing
+        if(growing[i]) {
+            points[i].push(newPoint);
+            
+            // Check if root should stop growing
+            if(root.side === "left" && newPoint.x > START_RIGHT ||
+               root.side === "right" && newPoint.x < START_LEFT ||
+               points[i].length > 100 ||  // Increased max points
+               newPoint.y < 100 || newPoint.y > 500) {  // Vertical bounds
+                growing[i] = false;
+            }
+        }
+    }
+}
+
+// Add hanging roots for detail
+for(let i = 0; i < roots.length; i++) {
+    for(let j = 1; j < points[i].length; j += 4) {
+        let point = points[i][j];
+        if(random() < 0.3) {
+            let hangLen = random(10, 20);
+            let hangX = random(-5, 5);
+            for(let t = 0; t < 2; t++) {
+                epdLine(point.x, point.y, point.x + hangX, point.y + hangLen + t);
+            }
+        }
+    }
+}`;
+
+            // Update the code editor
+            document.getElementById('code-editor').value = code;
+            // Trigger the preview update
+            updateSketch();
+        }
+
+        // Modify the button click handler
+        document.querySelector('button:nth-child(2)').onclick = generateRootBridgeCode;
     </script>
 </body>
 </html> 

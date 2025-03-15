@@ -5,6 +5,8 @@
 #include "imagedata.h"
 #include <stdlib.h>
 #include "Display.h"
+#include <esp_now.h>
+#include <WiFi.h>
 
 // Constants for bridge geometry
 const int BRIDGE_GAP = 500;
@@ -14,6 +16,7 @@ const int START_Y = 400;
 const int NUM_ROOTS = 8;
 const int MAX_POINTS = 100;
 const int MAX_STEPS = 200;
+const int DISPLAY_DELAY = 20000; // 20 seconds
 
 // Structure definitions
 struct Point {
@@ -33,24 +36,73 @@ struct Root {
     bool isLeft;
 };
 
+// Define the ESP-NOW message structure to match the sender
+typedef struct message_struct {
+  bool changeDetected;
+} message_struct;
+
 Root roots[NUM_ROOTS];
+bool displayUpdateRequested = false;
 
 // Function declarations
 void drawTree(int x, int y, int len, float angle, int depth);
 float randomFloat(float min, float max);
+void drawBridgeDisplay();
+
+// Callback function for ESP-NOW data reception
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+  Serial.println("ESP-NOW callback called");
+  message_struct receivedData;
+  memcpy(&receivedData, incomingData, sizeof(receivedData));
+  
+  Serial.println("ESP-NOW message received");
+  
+  if (receivedData.changeDetected) {
+    Serial.println("Change detected! Updating display...");
+    displayUpdateRequested = true;
+  }
+}
 
 /* Entry point ----------------------------------------------------------------*/
 void setup()
 {
+    Serial.begin(9600);
     DEV_Module_Init();
-    Display::begin();
     
-    // Initialize display
+    // Set device as a Wi-Fi Station
+    WiFi.mode(WIFI_STA);
+    
+    // Initialize ESP-NOW
+    if (esp_now_init() != ESP_OK) {
+      Serial.println("Error initializing ESP-NOW");
+      return;
+    }
+    
+    // Register callback function for received data
+    esp_now_register_recv_cb(OnDataRecv);
+    
+    Serial.println("ESP-NOW initialized");
+    Serial.print("MAC Address: ");
+    Serial.println(WiFi.macAddress());
+    
+    // Initialize display only once
+    Display::begin();
+    Display::background(WHITE);
+    Display::show();
+    
+    Serial.println("Waiting for ESP-NOW messages...");
+}
+
+// Function to draw the bridge display
+void drawBridgeDisplay() {
+    // Reset the display without reinitializing
     Display::background(WHITE);
     
-    // Draw banks
-    Display::rect(0, START_Y, START_LEFT, 600, true);    // left bank
-    Display::rect(START_RIGHT, START_Y, 683, 600, true); // right bank
+    // Draw banks - FIXED version
+    // Left bank - specify end coordinates, not width/height
+    Display::rect(0, START_Y, START_LEFT, START_Y + 600, true);    
+    // Right bank - specify end coordinates, not width/height
+    Display::rect(START_RIGHT, START_Y, EPD_13IN3K_WIDTH, START_Y + 600, true);
     
     // Draw trees on banks
     for(int i = 0; i < 5; i++) {
@@ -185,8 +237,15 @@ void setup()
     }
     
     Display::show();
-    delay(10000);
-    Display::end();
+    
+    // Wait for the specified delay time
+    delay(DISPLAY_DELAY);
+    
+    Display::background(WHITE);
+    Display::show();
+
+    // Reset the flag
+    displayUpdateRequested = false;
 }
 
 void drawTree(int x, int y, int len, float angle, int depth) {
@@ -210,5 +269,12 @@ float randomFloat(float min, float max) {
 /* The main loop -------------------------------------------------------------*/
 void loop()
 {
-  // Nothing to do here
+  // Check if a display update has been requested
+  if (displayUpdateRequested) {
+    Serial.println("Updating display...");
+    drawBridgeDisplay();
+  }
+  
+  // Small delay to prevent CPU hogging
+  delay(100);
 }

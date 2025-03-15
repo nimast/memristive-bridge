@@ -39,8 +39,8 @@ public:
         Paint_DrawLine(x1, y1, x2, y2, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
     }
     
-    static void rect(int x, int y, int w, int h, bool filled = false) {
-        Paint_DrawRectangle(x, y, x + w, y + h, BLACK, DOT_PIXEL_1X1, 
+    static void rect(int x1, int y1, int x2, int y2, bool filled = false) {
+        Paint_DrawRectangle(x1, y1, x2, y2, BLACK, DOT_PIXEL_1X1, 
             filled ? DRAW_FILL_FULL : DRAW_FILL_EMPTY);
     }
     

@@ -5,8 +5,10 @@
 #include "imagedata.h"
 #include <stdlib.h>
 #include "Display.h"
-#include <esp_now.h>
-#include <WiFi.h>
+#include <BLEDevice.h>
+#include <BLEClient.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 
 // Constants for bridge geometry
 const int BRIDGE_GAP = 500;
@@ -17,6 +19,11 @@ const int NUM_ROOTS = 8;
 const int MAX_POINTS = 100;
 const int MAX_STEPS = 200;
 const int DISPLAY_DELAY = 20000; // 20 seconds
+
+// BLE settings
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define DEVICE_NAME         "MemristiveBridge"
 
 // Structure definitions
 struct Point {
@@ -36,31 +43,109 @@ struct Root {
     bool isLeft;
 };
 
-// Define the ESP-NOW message structure to match the sender
-typedef struct message_struct {
-  bool changeDetected;
-} message_struct;
-
 Root roots[NUM_ROOTS];
 bool displayUpdateRequested = false;
+
+// BLE objects
+BLEClient* pClient = nullptr;
+BLERemoteCharacteristic* pRemoteCharacteristic = nullptr;
+bool connected = false;
+
+// Callback class for BLE client
+class MyClientCallback : public BLEClientCallbacks {
+  void onConnect(BLEClient* pclient) {
+    connected = true;
+    Serial.println("Connected to server");
+  }
+
+  void onDisconnect(BLEClient* pclient) {
+    connected = false;
+    Serial.println("Disconnected from server");
+  }
+};
+
+// Callback for characteristic notifications
+class MyNotifyCallback: public BLECharacteristicCallbacks {
+  void onNotify(BLECharacteristic* pCharacteristic) {
+    std::string value = pCharacteristic->getValue();
+    if (value.length() > 0) {
+      uint8_t message = value[0];
+      if (message == 1) {  // Change detected
+        Serial.println("Change detected! Updating display...");
+        displayUpdateRequested = true;
+      }
+    }
+  }
+};
 
 // Function declarations
 void drawTree(int x, int y, int len, float angle, int depth);
 float randomFloat(float min, float max);
 void drawBridgeDisplay();
 
-// Callback function for ESP-NOW data reception
-void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
-  Serial.println("ESP-NOW callback called");
-  message_struct receivedData;
-  memcpy(&receivedData, incomingData, sizeof(receivedData));
+// Initialize BLE client
+void initBLE() {
+  // Initialize BLE
+  BLEDevice::init("");
   
-  Serial.println("ESP-NOW message received");
+  // Create the BLE Client
+  pClient = BLEDevice::createClient();
+  pClient->setClientCallbacks(new MyClientCallback());
   
-  if (receivedData.changeDetected) {
-    Serial.println("Change detected! Updating display...");
-    displayUpdateRequested = true;
+  Serial.println("BLE initialized");
+  Serial.println("Scanning for server...");
+  
+  // Scan for the server
+  BLEScan* pBLEScan = BLEDevice::getScan();
+  BLEAdvertisedDevice* myDevice = nullptr;
+  
+  do {
+    BLEScanResults foundDevices = pBLEScan->start(5);
+    for(int i = 0; i < foundDevices.getCount(); i++) {
+      BLEAdvertisedDevice device = foundDevices.getDevice(i);
+      if (device.getName() == DEVICE_NAME) {
+        myDevice = new BLEAdvertisedDevice(device);
+        break;
+      }
+    }
+    pBLEScan->clearResults();
+    if (!myDevice) {
+      Serial.println("Server not found, retrying...");
+      delay(1000);
+    }
+  } while (!myDevice);
+  
+  // Connect to the server
+  if (pClient->connect(myDevice)) {
+    Serial.println("Connected to server");
+    
+    // Get the service
+    BLERemoteService* pRemoteService = pClient->getService(SERVICE_UUID);
+    if (pRemoteService == nullptr) {
+      Serial.println("Failed to find service");
+      pClient->disconnect();
+      return;
+    }
+    
+    // Get the characteristic
+    pRemoteCharacteristic = pRemoteService->getCharacteristic(CHARACTERISTIC_UUID);
+    if (pRemoteCharacteristic == nullptr) {
+      Serial.println("Failed to find characteristic");
+      pClient->disconnect();
+      return;
+    }
+    
+    // Register for notifications
+    if(pRemoteCharacteristic->canNotify()) {
+      pRemoteCharacteristic->registerForNotify(new MyNotifyCallback());
+    }
+    
+    Serial.println("BLE setup complete");
+  } else {
+    Serial.println("Failed to connect to server");
   }
+  
+  delete myDevice;
 }
 
 /* Entry point ----------------------------------------------------------------*/
@@ -69,28 +154,15 @@ void setup()
     Serial.begin(9600);
     DEV_Module_Init();
     
-    // Set device as a Wi-Fi Station
-    WiFi.mode(WIFI_STA);
-    
-    // Initialize ESP-NOW
-    if (esp_now_init() != ESP_OK) {
-      Serial.println("Error initializing ESP-NOW");
-      return;
-    }
-    
-    // Register callback function for received data
-    esp_now_register_recv_cb(OnDataRecv);
-    
-    Serial.println("ESP-NOW initialized");
-    Serial.print("MAC Address: ");
-    Serial.println(WiFi.macAddress());
-    
-    // Initialize display only once
+    // Initialize display
     Display::begin();
     Display::background(WHITE);
     Display::show();
     
-    Serial.println("Waiting for ESP-NOW messages...");
+    // Initialize BLE
+    initBLE();
+    
+    Serial.println("Waiting for BLE messages...");
 }
 
 // Function to draw the bridge display

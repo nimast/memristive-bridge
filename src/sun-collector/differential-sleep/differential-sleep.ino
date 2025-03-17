@@ -1,5 +1,6 @@
 #define INCLUDE_ADS TRUE
 #define DEBUG TRUE  // Set to TRUE for debug output, FALSE for power saving
+#define DISABLE_SLEEP TRUE  // Set to TRUE to disable sleep for debugging
 
 #ifdef INCLUDE_ADS
 #include <Adafruit_ADS1X15.h>
@@ -9,17 +10,32 @@
 #define USE_USB_CDC
 
 #include <Adafruit_NeoPixel.h>
-#include <esp_now.h>
-#include <WiFi.h>
-#include <esp_wifi.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 #include <esp_sleep.h>
 #include <driver/rtc_io.h>
+#include <esp_pm.h>
+#include <driver/gpio.h>
 
-#define I2C_SDA 8
-#define I2C_SCL 9
-#define PIN 21
+// Updated I2C pins for ESP32-H2-DEV-KIT-N4
+#define I2C_SDA 4  // GPIO4 for SDA
+#define I2C_SCL 5  // GPIO5 for SCL
+// I2C pins for ESP32-S3
+// #define I2C_SDA 8  
+// #define I2C_SCL 9  
+// RGB LED pin for ESP32-S3
+// #define PIN 21
+// RGB LED pin for ESP32-H2-DEV-KIT-N4
+#define PIN 2  // GPIO2 for RGB LED
 #define DELAYVAL 500
 #define LED_ON_TIME 5000  // 5 seconds in milliseconds
+
+// BLE settings
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define DEVICE_NAME         "MemristiveBridge"
 
 // Power saving settings
 #define CPU_FREQ_MHZ 80   // Lower CPU frequency (default is 240MHz)
@@ -36,27 +52,28 @@
 #define HOUR_MS 3600000               // One hour in milliseconds
 #define MAX_TRIGGERS_PER_HOUR 30      // Maximum number of triggers per hour
 
-// MAC Address of receiver
-uint8_t receiverMacAddress[] = {0xCC, 0x7B, 0x5C, 0xB9, 0xEF, 0x0C};
+// BLE objects
+BLEServer* pServer = nullptr;
+BLECharacteristic* pCharacteristic = nullptr;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
 
-// Define a data structure
-typedef struct message_struct {
-  bool changeDetected;
-} message_struct;
+// Callback class for BLE server
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+      #if DEBUG
+      Serial.println("Device connected");
+      #endif
+    };
 
-// Create a structured object
-message_struct myData;
-
-// Peer info
-esp_now_peer_info_t peerInfo;
-
-Adafruit_NeoPixel pixels(1, PIN, NEO_RGB + NEO_KHZ800);
-
-#ifdef INCLUDE_ADS
-TwoWire s3i2c(0);
-Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
-// Adafruit_ADS1015 ads;     /* Use this for the 12-bit version */
-#endif
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+      #if DEBUG
+      Serial.println("Device disconnected");
+      #endif
+    }
+};
 
 // Variables for change detection
 float values[WINDOW_SIZE];            // Circular buffer for recent values
@@ -86,70 +103,93 @@ RTC_DATA_ATTR bool rtc_baselineEstablished = false;
 RTC_DATA_ATTR int rtc_stableReadingsCount = 0;
 RTC_DATA_ATTR bool rtc_firstBoot = true;
 
-// WiFi status
-bool wifiInitialized = false;
+// LED control functions
+void initLED() {
+  gpio_config_t io_conf = {};
+  io_conf.intr_type = GPIO_INTR_DISABLE;
+  io_conf.mode = GPIO_MODE_OUTPUT;
+  io_conf.pin_bit_mask = (1ULL << PIN) | (1ULL << LED_G) | (1ULL << LED_B);
+  io_conf.pull_down_en = 0;
+  io_conf.pull_up_en = 0;
+  gpio_config(&io_conf);
+  
+  // Turn all LEDs off initially
+  gpio_set_level(PIN, 0);
+  gpio_set_level(LED_G, 0);
+  gpio_set_level(LED_B, 0);
+}
 
-// Callback when data is sent
-void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+void setLEDColor(uint8_t r, uint8_t g, uint8_t b) {
+  gpio_set_level(PIN, r > 0 ? 1 : 0);
+  gpio_set_level(LED_G, g > 0 ? 1 : 0);
+  gpio_set_level(LED_B, b > 0 ? 1 : 0);
+}
+
+// Initialize BLE
+void initBLE() {
+  // Create the BLE Device
+  BLEDevice::init(DEVICE_NAME);
+
+  // Create the BLE Server
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  // Create the BLE Service
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  // Create the BLE Characteristic
+  pCharacteristic = pService->createCharacteristic(
+                      CHARACTERISTIC_UUID,
+                      BLECharacteristic::PROPERTY_READ   |
+                      BLECharacteristic::PROPERTY_WRITE  |
+                      BLECharacteristic::PROPERTY_NOTIFY
+                    );
+
+  // Add a descriptor
+  pCharacteristic->addDescriptor(new BLE2902());
+
+  // Start the service
+  pService->start();
+
+  // Start advertising
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+
   #if DEBUG
-  Serial.print("Last Packet Send Status: ");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  Serial.println("BLE initialized");
   #endif
 }
 
-// Initialize WiFi and ESP-NOW
-void initWiFi() {
-  if (wifiInitialized) return;
-  
-  // Set device as a Wi-Fi Station
-  WiFi.mode(WIFI_STA);
+// Deinitialize BLE to save power
+void deinitBLE() {
+  if (pServer != nullptr) {
+    pServer->getAdvertising()->stop();
+    BLEDevice::deinit();
+    pServer = nullptr;
+    pCharacteristic = nullptr;
+  }
+}
 
-  // Init ESP-NOW
-  if (esp_now_init() != ESP_OK) {
+// Send BLE message
+void sendBLEMessage() {
+  if (!deviceConnected) {
     #if DEBUG
-    Serial.println("Error initializing ESP-NOW");
+    Serial.println("No device connected, cannot send message");
     #endif
     return;
   }
 
-  // Register the send callback
-  esp_now_register_send_cb(OnDataSent);
-  
-  // Register peer
-  memcpy(peerInfo.peer_addr, receiverMacAddress, 6);
-  peerInfo.channel = 0;  
-  peerInfo.encrypt = false;
-  
-  // Add peer        
-  if (esp_now_add_peer(&peerInfo) != ESP_OK){
-    #if DEBUG
-    Serial.println("Failed to add peer");
-    #endif
-    return;
-  }
-
-  #if DEBUG
-  Serial.println("ESP-NOW initialized");
-  Serial.print("MAC Address: ");
-  Serial.println(WiFi.macAddress());
-  #endif
-  
-  wifiInitialized = true;
-}
-
-// Deinitialize WiFi to save power
-void deinitWiFi() {
-  if (!wifiInitialized) return;
-  
-  esp_now_deinit();
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  esp_wifi_stop();
-  
-  wifiInitialized = false;
+  // Send the change detected message
+  uint8_t message = 1;  // 1 indicates change detected
+  pCharacteristic->setValue(&message, 1);
+  pCharacteristic->notify();
   
   #if DEBUG
-  Serial.println("WiFi and ESP-NOW deinitialized");
+  Serial.println("BLE message sent successfully");
   #endif
 }
 
@@ -219,9 +259,12 @@ void setup()
   Serial.println(" MHz");
   #endif
 
-  pixels.begin();
-  pixels.setPixelColor(0, pixels.Color(5, 0, 0));  // Dim red for startup
-  pixels.show();
+  // Initialize LED
+  initLED();
+  setLEDColor(5, 0, 0);  // Dim red for startup
+
+  // Initialize BLE
+  initBLE();
 
   // Restore state if not first boot
   restoreStateFromRTC();
@@ -243,23 +286,13 @@ void setup()
     lastHeartbeatTime = hourStartTime;
   }
 
-  // The ADC input range (or gain) can be changed via the following
-  // functions, but be careful never to exceed VDD +0.3V max, or to
-  // exceed the upper and lower limits if you adjust the input range!
-  // Setting these values incorrectly may destroy your ADC!
-  //                                                                ADS1015  ADS1115
-  //                                                                -------  -------
-  // ads.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
-  // ads.setGain(GAIN_ONE);        // 1x gain   +/- 4.096V  1 bit = 2mV      0.125mV
-  // ads.setGain(GAIN_TWO);        // 2x gain   +/- 2.048V  1 bit = 1mV      0.0625mV
-  // ads.setGain(GAIN_FOUR);       // 4x gain   +/- 1.024V  1 bit = 0.5mV    0.03125mV
-  // ads.setGain(GAIN_EIGHT);      // 8x gain   +/- 0.512V  1 bit = 0.25mV   0.015625mV
-  // ads.setGain(GAIN_SIXTEEN);    // 16x gain  +/- 0.256V  1 bit = 0.125mV  0.0078125mV
   #ifdef INCLUDE_ADS
   #if DEBUG
   Serial.println("Initializing ADS");
   #endif
   
+  TwoWire s3i2c(0);
+  Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
   s3i2c.begin(I2C_SDA, I2C_SCL, 100000);
 
   if (!ads.begin(ADS1X15_ADDRESS, &s3i2c)) {
@@ -336,31 +369,6 @@ bool canTrigger() {
   return triggerCount < idealTriggers || (currentTime - lastTriggerTime >= MIN_TRIGGER_INTERVAL * 2);
 }
 
-// Send ESP-NOW message
-void sendESPNowMessage() {
-  // Initialize WiFi and ESP-NOW only when needed
-  initWiFi();
-  
-  myData.changeDetected = true;
-  
-  // Send message via ESP-NOW
-  esp_err_t result = esp_now_send(receiverMacAddress, (uint8_t *) &myData, sizeof(myData));
-  
-  #if DEBUG
-  if (result == ESP_OK) {
-    Serial.println("ESP-NOW message sent successfully");
-  } else {
-    Serial.println("Error sending ESP-NOW message");
-  }
-  #endif
-  
-  // Wait a bit to ensure message is sent
-  delay(100);
-  
-  // Turn off WiFi to save power
-  deinitWiFi();
-}
-
 // Handle a detected change
 void handleChange(float value, float avgValue, float changeAmount) {
   lastTriggerTime = millis();
@@ -382,11 +390,10 @@ void handleChange(float value, float avgValue, float changeAmount) {
   }
   
   // Visual indication - Green for change detected
-  pixels.setPixelColor(0, pixels.Color(0, 50, 0));
-  pixels.show();
+  setLEDColor(0, 50, 0);
   
-  // Send ESP-NOW message
-  sendESPNowMessage();
+  // Send BLE message
+  sendBLEMessage();
   
   #if DEBUG
   Serial.print("CHANGE DETECTED! Value: ");
@@ -407,8 +414,7 @@ void handleChange(float value, float avgValue, float changeAmount) {
   delay(LED_ON_TIME);
   
   // Turn off LED
-  pixels.setPixelColor(0, pixels.Color(0, 0, 0));
-  pixels.show();
+  setLEDColor(0, 0, 0);
 }
 
 // Heartbeat function to show the device is alive
@@ -417,11 +423,9 @@ void showHeartbeat() {
   
   if (currentTime - lastHeartbeatTime >= HEARTBEAT_INTERVAL) {
     // Flash the LED in stronger red
-    pixels.setPixelColor(0, pixels.Color(50, 0, 0));
-    pixels.show();
+    setLEDColor(50, 0, 0);
     delay(200);
-    pixels.setPixelColor(0, pixels.Color(5, 0, 0));  // Back to dim red
-    pixels.show();
+    setLEDColor(5, 0, 0);  // Back to dim red
     
     lastHeartbeatTime = currentTime;
     
@@ -534,16 +538,22 @@ void loop()
   #endif
   
   // Turn off LED before sleep
-  pixels.setPixelColor(0, pixels.Color(0, 0, 0));
-  pixels.show();
+  setLEDColor(0, 0, 0);
   
+  // Deinitialize BLE before sleep
+  deinitBLE();
+  
+  #ifndef DISABLE_SLEEP
   // Go to deep sleep
   esp_sleep_enable_timer_wakeup(SLEEP_DURATION * 1000000); // Convert to microseconds
   
   #ifdef USE_USB_CDC
   // For ESP32-S3, disable USB CDC during sleep to prevent issues on wake
-  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
+  esp_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_OFF);
   #endif
   
   esp_deep_sleep_start();
+  #else
+  delay(SLEEP_DURATION * 1000);  // Just delay instead of sleeping
+  #endif
 }

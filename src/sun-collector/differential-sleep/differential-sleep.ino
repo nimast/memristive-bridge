@@ -1,14 +1,12 @@
-#define INCLUDE_ADS TRUE
+// Memristive bridge sender
+// Copyright (c) Nimrod Astarhan 2025
+// This sketch needs v3 of esp board lib to work with ESP32H2
+// Last used 3.1.3
+
 #define DEBUG TRUE  // Set to TRUE for debug output, FALSE for power saving
 #define DISABLE_SLEEP TRUE  // Set to TRUE to disable sleep for debugging
 
-#ifdef INCLUDE_ADS
 #include <Adafruit_ADS1X15.h>
-#endif
-
-// Use USB CDC for serial on ESP32-S3
-#define USE_USB_CDC
-
 #include <Adafruit_NeoPixel.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -27,8 +25,10 @@
 // #define I2C_SCL 9  
 // RGB LED pin for ESP32-S3
 // #define PIN 21
-// RGB LED pin for ESP32-H2-DEV-KIT-N4
-#define PIN 2  // GPIO2 for RGB LED
+// RGB LED pins for ESP32-H2-DEV-KIT-N4
+#define LED_R GPIO_NUM_2  // GPIO2 for Red
+#define LED_G GPIO_NUM_3  // GPIO3 for Green
+#define LED_B GPIO_NUM_4  // GPIO4 for Blue
 #define DELAYVAL 500
 #define LED_ON_TIME 5000  // 5 seconds in milliseconds
 
@@ -38,7 +38,7 @@
 #define DEVICE_NAME         "MemristiveBridge"
 
 // Power saving settings
-#define CPU_FREQ_MHZ 80   // Lower CPU frequency (default is 240MHz)
+#define CPU_FREQ_MHZ 160   // Changed to 160MHz which is supported
 #define SLEEP_DURATION 5 // Sleep duration in seconds
 #define HEARTBEAT_INTERVAL 5000 // Heartbeat interval in milliseconds
 
@@ -103,26 +103,15 @@ RTC_DATA_ATTR bool rtc_baselineEstablished = false;
 RTC_DATA_ATTR int rtc_stableReadingsCount = 0;
 RTC_DATA_ATTR bool rtc_firstBoot = true;
 
-// LED control functions
-void initLED() {
-  gpio_config_t io_conf = {};
-  io_conf.intr_type = GPIO_INTR_DISABLE;
-  io_conf.mode = GPIO_MODE_OUTPUT;
-  io_conf.pin_bit_mask = (1ULL << PIN) | (1ULL << LED_G) | (1ULL << LED_B);
-  io_conf.pull_down_en = 0;
-  io_conf.pull_up_en = 0;
-  gpio_config(&io_conf);
-  
-  // Turn all LEDs off initially
-  gpio_set_level(PIN, 0);
-  gpio_set_level(LED_G, 0);
-  gpio_set_level(LED_B, 0);
-}
+// Global objects
+TwoWire s3i2c(0);  // This constructor already initializes I2C
+Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 
+#define RGB_BRIGHTNESS 10  // Brightness level for RGB LED
+
+// LED control functions
 void setLEDColor(uint8_t r, uint8_t g, uint8_t b) {
-  gpio_set_level(PIN, r > 0 ? 1 : 0);
-  gpio_set_level(LED_G, g > 0 ? 1 : 0);
-  gpio_set_level(LED_B, b > 0 ? 1 : 0);
+  rgbLedWrite(RGB_BUILTIN, g, r, b);  // Swapped r and g for GRB order
 }
 
 // Initialize BLE
@@ -240,68 +229,70 @@ void restoreStateFromRTC() {
 
 void setup()
 {
-  // Set CPU frequency to save power BEFORE initializing serial
-  setCpuFrequencyMhz(CPU_FREQ_MHZ);
+  // Initialize serial first, before anything else
+  Serial.begin();
+  delay(2000);  // Give serial time to initialize
   
-  #if DEBUG
-  #ifdef USE_USB_CDC
-  // For ESP32-S3 with USB CDC
-  Serial.begin();  // No baud rate needed for USB CDC
-  #else
-  // Traditional UART serial
-  Serial.begin(115200);
-  #endif
+  Serial.println("\n\nStarting setup...");
   
-  delay(2000);  // Longer delay for USB CDC initialization
-  Serial.println("Hello! Starting in low power mode");
-  Serial.print("CPU Frequency set to: ");
-  Serial.print(getCpuFrequencyMhz());
-  Serial.println(" MHz");
-  #endif
+  // Set CPU frequency
+  if (!setCpuFrequencyMhz(CPU_FREQ_MHZ)) {
+    Serial.println("Failed to set CPU frequency!");
+  } else {
+    Serial.print("CPU Frequency set to: ");
+    Serial.print(getCpuFrequencyMhz());
+    Serial.println(" MHz");
+  }
 
-  // Initialize LED
-  initLED();
-  setLEDColor(5, 0, 0);  // Dim red for startup
+  // Test LED
+  Serial.println("Testing LED...");
+  setLEDColor(RGB_BRIGHTNESS, 0, 0);  // Red
+  delay(1000);
+  setLEDColor(0, RGB_BRIGHTNESS, 0);  // Green
+  delay(1000);
+  setLEDColor(0, 0, RGB_BRIGHTNESS);  // Blue
+  delay(1000);
+  setLEDColor(0, 0, 0);  // Off
+  Serial.println("LED test complete");
 
   // Initialize BLE
+  Serial.println("Initializing BLE...");
   initBLE();
+  Serial.println("BLE initialization complete");
 
   // Restore state if not first boot
+  Serial.println("Restoring state from RTC...");
   restoreStateFromRTC();
+  Serial.println("State restoration complete");
 
-  #if DEBUG
-  Serial.println("Getting differential reading from AIN0 (P) and AIN1 (N)");
-  Serial.println("ADC Range: +/- 6.144V (1 bit = 3mV/ADS1015, 0.1875mV/ADS1115)");
-  #endif
-
-  // Initialize the values array if first boot
-  if (rtc_firstBoot) {
-    for (int i = 0; i < WINDOW_SIZE; i++) {
-      values[i] = 0;
+  // Initialize I2C with explicit pins
+  Serial.println("Initializing I2C...");
+  s3i2c.end();  // End any existing I2C connection
+  if (!s3i2c.begin(I2C_SDA, I2C_SCL, 100000)) {
+    Serial.println("Failed to initialize I2C!");
+    while (1) {
+      setLEDColor(0, RGB_BRIGHTNESS, 0);  // Green to indicate error
+      delay(500);
+      setLEDColor(0, 0, 0);
+      delay(500);
     }
-
-    // Initialize timing variables
-    hourStartTime = millis();
-    lastTriggerTime = hourStartTime;
-    lastHeartbeatTime = hourStartTime;
   }
+  Serial.println("I2C initialized successfully");
 
-  #ifdef INCLUDE_ADS
-  #if DEBUG
-  Serial.println("Initializing ADS");
-  #endif
-  
-  TwoWire s3i2c(0);
-  Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
-  s3i2c.begin(I2C_SDA, I2C_SCL, 100000);
-
+  // Initialize ADS
+  Serial.println("Initializing ADS...");
   if (!ads.begin(ADS1X15_ADDRESS, &s3i2c)) {
-    #if DEBUG
-    Serial.println("Failed to initialize ADS.");
-    #endif
-    while (1);
+    Serial.println("Failed to initialize ADS!");
+    while (1) {
+      setLEDColor(RGB_BRIGHTNESS, 0, 0);  // Red to indicate error
+      delay(500);
+      setLEDColor(0, 0, 0);
+      delay(500);
+    }
   }
-  #endif
+  Serial.println("ADS initialization complete");
+
+  Serial.println("Setup complete!");
 }
 
 // Calculate the average of the values in the buffer
@@ -390,7 +381,7 @@ void handleChange(float value, float avgValue, float changeAmount) {
   }
   
   // Visual indication - Green for change detected
-  setLEDColor(0, 50, 0);
+  setLEDColor(0, RGB_BRIGHTNESS, 0);
   
   // Send BLE message
   sendBLEMessage();
@@ -422,10 +413,10 @@ void showHeartbeat() {
   unsigned long currentTime = millis();
   
   if (currentTime - lastHeartbeatTime >= HEARTBEAT_INTERVAL) {
-    // Flash the LED in stronger red
-    setLEDColor(50, 0, 0);
+    // Flash the LED in soft orange/yellow (GRB order)
+    setLEDColor(RGB_BRIGHTNESS/2, RGB_BRIGHTNESS/2, 0);  // Soft orange/yellow
     delay(200);
-    setLEDColor(5, 0, 0);  // Back to dim red
+    setLEDColor(RGB_BRIGHTNESS/20, RGB_BRIGHTNESS/20, 0);  // Back to dim orange/yellow
     
     lastHeartbeatTime = currentTime;
     

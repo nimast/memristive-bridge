@@ -1,3 +1,7 @@
+// Copyright 2025 Nimrod Astarhan code modified from Waveshare using Cursor
+// To upload this I used esp32 by expressive board installation
+// Latest upload was with v2.0.17
+
 /* Includes ------------------------------------------------------------------*/
 #include "DEV_Config.h"
 #include "EPD.h"
@@ -137,7 +141,15 @@ void initBLE() {
     
     // Register for notifications
     if(pRemoteCharacteristic->canNotify()) {
-      pRemoteCharacteristic->registerForNotify(new MyNotifyCallback());
+      pRemoteCharacteristic->registerForNotify([](BLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+        if (length > 0) {
+          uint8_t message = pData[0];
+          if (message == 1) {  // Change detected
+            Serial.println("Change detected! Updating display...");
+            displayUpdateRequested = true;
+          }
+        }
+      });
     }
     
     Serial.println("BLE setup complete");

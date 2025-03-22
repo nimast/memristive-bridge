@@ -10,9 +10,9 @@
 #include <stdlib.h>
 #include "Display.h"
 #include <BLEDevice.h>
-#include <BLEClient.h>
 #include <BLEUtils.h>
-#include <BLE2902.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
 
 // Constants for bridge geometry
 const int BRIDGE_GAP = 500;
@@ -28,6 +28,8 @@ const int DISPLAY_DELAY = 20000; // 20 seconds
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define DEVICE_NAME         "MemristiveBridge"
+#define SCAN_INTERVAL 2000  // Scan every 2 seconds
+#define SCAN_TIME 4         // Scan for 4 seconds
 
 // Structure definitions
 struct Point {
@@ -47,117 +49,125 @@ struct Root {
     bool isLeft;
 };
 
-Root roots[NUM_ROOTS];
-bool displayUpdateRequested = false;
-
-// BLE objects
-BLEClient* pClient = nullptr;
-BLERemoteCharacteristic* pRemoteCharacteristic = nullptr;
-bool connected = false;
-
-// Callback class for BLE client
-class MyClientCallback : public BLEClientCallbacks {
-  void onConnect(BLEClient* pclient) {
-    connected = true;
-    Serial.println("Connected to server");
-  }
-
-  void onDisconnect(BLEClient* pclient) {
-    connected = false;
-    Serial.println("Disconnected from server");
-  }
-};
-
-// Callback for characteristic notifications
-class MyNotifyCallback: public BLECharacteristicCallbacks {
-  void onNotify(BLECharacteristic* pCharacteristic) {
-    std::string value = pCharacteristic->getValue();
-    if (value.length() > 0) {
-      uint8_t message = value[0];
-      if (message == 1) {  // Change detected
-        Serial.println("Change detected! Updating display...");
-        displayUpdateRequested = true;
-      }
-    }
-  }
-};
-
 // Function declarations
 void drawTree(int x, int y, int len, float angle, int depth);
 float randomFloat(float min, float max);
 void drawBridgeDisplay();
+void startScan();
 
-// Initialize BLE client
-void initBLE() {
-  // Initialize BLE
-  BLEDevice::init("");
-  
-  // Create the BLE Client
-  pClient = BLEDevice::createClient();
-  pClient->setClientCallbacks(new MyClientCallback());
-  
-  Serial.println("BLE initialized");
-  Serial.println("Scanning for server...");
-  
-  // Scan for the server
-  BLEScan* pBLEScan = BLEDevice::getScan();
-  BLEAdvertisedDevice* myDevice = nullptr;
-  
-  do {
-    BLEScanResults foundDevices = pBLEScan->start(5);
-    for(int i = 0; i < foundDevices.getCount(); i++) {
-      BLEAdvertisedDevice device = foundDevices.getDevice(i);
-      if (device.getName() == DEVICE_NAME) {
-        myDevice = new BLEAdvertisedDevice(device);
-        break;
+Root roots[NUM_ROOTS];
+bool displayUpdateRequested = false;
+
+// Global BLE variables
+bool scanning = false;               // Whether we're currently scanning
+BLEScan* pBLEScan = nullptr;         // Global scan object
+unsigned long lastScanTime = 0;      // Track when we last scanned
+
+// Callback for scan results - global instance
+class MyScanCallbacks: public BLEAdvertisedDeviceCallbacks {
+  public:
+    void onResult(BLEAdvertisedDevice advertisedDevice) override {
+      // No need to check connectionInProgress anymore
+      
+      Serial.print("Found device: ");
+      Serial.println(advertisedDevice.toString().c_str());
+      
+      // Check if this is our device - by service UUID or name
+      bool matchesService = advertisedDevice.haveServiceUUID() && 
+                           advertisedDevice.getServiceUUID().equals(BLEUUID(SERVICE_UUID));
+      bool matchesName = advertisedDevice.haveName() && 
+                        strcmp(advertisedDevice.getName().c_str(), DEVICE_NAME) == 0;
+      
+      if (matchesService || matchesName) {
+        Serial.print("Found our beacon device! ");
+        if (matchesService) Serial.print("Service UUID matched. ");
+        if (matchesName) Serial.print("Name matched. ");
+        
+        // Stop scanning temporarily
+        pBLEScan->stop();
+        scanning = false;
+        
+        // Set LED indicator - use green LED to show device found
+        digitalWrite(2, LOW);
+        digitalWrite(4, HIGH);
+        digitalWrite(5, LOW);
+        
+        // Trigger display update immediately
+        Serial.println("Beacon found! Triggering display update...");
+        displayUpdateRequested = true;
+        
+        // Wait a moment to allow potential additional beacons to be ignored
+        delay(1000);
+        
+        // Turn off indicator LED
+        digitalWrite(4, LOW);
+        
+        // Reset scan timer to wait a bit before starting to scan again
+        lastScanTime = millis();
       }
     }
-    pBLEScan->clearResults();
-    if (!myDevice) {
-      Serial.println("Server not found, retrying...");
-      delay(1000);
-    }
-  } while (!myDevice);
-  
-  // Connect to the server
-  if (pClient->connect(myDevice)) {
-    Serial.println("Connected to server");
-    
-    // Get the service
-    BLERemoteService* pRemoteService = pClient->getService(SERVICE_UUID);
-    if (pRemoteService == nullptr) {
-      Serial.println("Failed to find service");
-      pClient->disconnect();
-      return;
-    }
-    
-    // Get the characteristic
-    pRemoteCharacteristic = pRemoteService->getCharacteristic(CHARACTERISTIC_UUID);
-    if (pRemoteCharacteristic == nullptr) {
-      Serial.println("Failed to find characteristic");
-      pClient->disconnect();
-      return;
-    }
-    
-    // Register for notifications
-    if(pRemoteCharacteristic->canNotify()) {
-      pRemoteCharacteristic->registerForNotify([](BLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
-        if (length > 0) {
-          uint8_t message = pData[0];
-          if (message == 1) {  // Change detected
-            Serial.println("Change detected! Updating display...");
-            displayUpdateRequested = true;
-          }
-        }
-      });
-    }
-    
-    Serial.println("BLE setup complete");
-  } else {
-    Serial.println("Failed to connect to server");
+};
+
+// Start BLE scanning for beacons
+void startScan() {
+  // Stop any ongoing scan first
+  if (scanning) {
+    pBLEScan->stop();
+    delay(100); // Give it time to stop properly
   }
   
-  delete myDevice;
+  Serial.println("Starting BLE scan for beacons...");
+  scanning = true;
+  
+  // Clear previous scan results
+  pBLEScan->clearResults();
+  
+  // Set scan parameters for better discovery of beacons
+  pBLEScan->setActiveScan(true);  // Active scan uses more power, but gets results faster
+  pBLEScan->setInterval(30);      // Short interval (in ms)
+  pBLEScan->setWindow(25);        // Wide window relative to interval (in ms)
+  
+  // Visual indicator that we're scanning - use blue LED for beacon scanning
+  digitalWrite(2, LOW);
+  digitalWrite(4, LOW);
+  digitalWrite(5, HIGH);
+  
+  // Start the scan with continuous result handling
+  if (pBLEScan->start(SCAN_TIME, nullptr, false)) {
+    Serial.println("Scan started successfully");
+    lastScanTime = millis();
+  } else {
+    Serial.println("Failed to start scan");
+    scanning = false;
+    digitalWrite(5, LOW); // Turn off scan LED
+  }
+}
+
+// Initialize BLE scanner
+void initBLE() {
+  // Initialize BLE with a device name to make debugging easier
+  BLEDevice::init("EPD13in3k-Display");
+  
+  // Set power level to maximum for better range
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_SCAN, ESP_PWR_LVL_P9);
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
+  
+  Serial.println("BLE Device initialized with maximum power");
+  
+  // Create scan object
+  pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyScanCallbacks());
+  
+  // Set scan parameters for aggressive discovery
+  pBLEScan->setActiveScan(true);
+  pBLEScan->setInterval(30);
+  pBLEScan->setWindow(25);
+  
+  Serial.println("Scan configured with aggressive parameters");
+  Serial.println("BLE initialized, ready to scan for beacons");
+  
+  // Start the first scan immediately
+  startScan();
 }
 
 /* Entry point ----------------------------------------------------------------*/
@@ -170,6 +180,14 @@ void setup()
     Display::begin();
     Display::background(WHITE);
     Display::show();
+    
+    // Set up GPIO pins for status LEDs
+    pinMode(2, OUTPUT);
+    pinMode(4, OUTPUT);
+    pinMode(5, OUTPUT);
+    digitalWrite(2, LOW);
+    digitalWrite(4, LOW);
+    digitalWrite(5, LOW);
     
     // Initialize BLE
     initBLE();
@@ -353,6 +371,37 @@ float randomFloat(float min, float max) {
 /* The main loop -------------------------------------------------------------*/
 void loop()
 {
+  // Check if we need to scan for devices
+  if (!scanning && (millis() - lastScanTime > SCAN_INTERVAL)) {
+    startScan();
+  }
+  
+  // If we're scanning and it's been running too long, stop it
+  if (scanning && (millis() - lastScanTime > SCAN_TIME * 1000)) {
+    Serial.println("Scan timeout, stopping scan");
+    pBLEScan->stop();
+    scanning = false;
+    
+    // Turn off all scan indicator LEDs
+    digitalWrite(2, LOW);
+    digitalWrite(4, LOW);
+    digitalWrite(5, LOW);
+    
+    // Reset scan timer to start scanning again after a short delay
+    lastScanTime = millis() + 1000; // 1 second delay before next scan
+  }
+  
+  // Periodically print status
+  static unsigned long lastStatusUpdate = 0;
+  if (millis() - lastStatusUpdate > 5000) {
+    lastStatusUpdate = millis();
+    if (scanning) {
+      Serial.println("Currently scanning for beacon device...");
+    } else {
+      Serial.println("Waiting to start next scan...");
+    }
+  }
+  
   // Check if a display update has been requested
   if (displayUpdateRequested) {
     Serial.println("Updating display...");
@@ -360,5 +409,5 @@ void loop()
   }
   
   // Small delay to prevent CPU hogging
-  delay(100);
+  delay(50);
 }

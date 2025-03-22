@@ -3,8 +3,10 @@
 // This sketch needs v3 of esp board lib to work with ESP32H2
 // Last used 3.1.3
 
-#define DEBUG TRUE  // Set to TRUE for debug output, FALSE for power saving
-#define DISABLE_SLEEP TRUE  // Set to TRUE to disable sleep for debugging
+// Make sure these are defined as actual integer values, not TRUE/FALSE
+#define DEBUG 0  // Set to 1 for detailed debug output, 0 for minimal output
+#define INFO 1   // Set to 1 for important info messages, 0 for silent operation
+#define DISABLE_SLEEP 1  // Set to 1 to disable sleep for debugging
 
 #include <Adafruit_ADS1X15.h>
 #include <Adafruit_NeoPixel.h>
@@ -36,19 +38,23 @@
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define DEVICE_NAME         "MemristiveBridge"
+#define BLE_CONNECTION_TIMEOUT 30000  // 30 seconds max to wait for connection (increased from 10s)
+#define BLE_RECONNECT_ATTEMPTS 5      // Number of times to try reconnecting (increased from 3)
+#define BLE_ADVERTISE_PERIOD 10000     // milliseconds of advertising before checking connection 
+#define BLE_CONNECTION_WAIT_TIME 5000  // milliseconds to wait for connection to complete after advertising is seen
+#define BLE_BEACON_DURATION 10000  // Advertise for 10 seconds when change detected
 
 // Power saving settings
-#define CPU_FREQ_MHZ 160   // Changed to 160MHz which is supported
 #define SLEEP_DURATION 5 // Sleep duration in seconds
 #define HEARTBEAT_INTERVAL 5000 // Heartbeat interval in milliseconds
 
 // Change detection parameters
 #define WINDOW_SIZE 5                 // Smaller window size for faster response
-#define MIN_THRESHOLD 0.1875          // Minimum threshold set to exactly one bit of the ADS1115 (in mV)
-#define MAX_THRESHOLD 50.0            // Lower maximum threshold (in mV)
-#define ADAPTIVE_FACTOR 1.1           // Even gentler adaptation factor
+#define MIN_THRESHOLD 0.1000          // Minimum threshold set to exactly one bit of the ADS1115 (in mV)
+#define MAX_THRESHOLD 1.0            // Lower maximum threshold (in mV)
+#define ADAPTIVE_FACTOR 1.001           // Even gentler adaptation factor
 #define STABILITY_THRESHOLD 0.1       // Lower threshold to determine if signal is stable (in mV)
-#define MIN_TRIGGER_INTERVAL 60000    // Minimum time between triggers (1 minute in ms)
+#define MIN_TRIGGER_INTERVAL 5000     // Reduced from 60000 to 5000 (5 seconds between triggers)
 #define HOUR_MS 3600000               // One hour in milliseconds
 #define MAX_TRIGGERS_PER_HOUR 30      // Maximum number of triggers per hour
 
@@ -58,20 +64,140 @@ BLECharacteristic* pCharacteristic = nullptr;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
+// Debug and info print functions - simplified for reliability
+void debugPrintln(const char* message) {
+  if (DEBUG) {
+    Serial.println(message);
+    Serial.flush();
+  }
+}
+
+void debugPrint(const char* message) {
+  if (DEBUG) {
+    Serial.print(message);
+  }
+}
+
+void infoPrintln(const char* message) {
+  if (INFO) {
+    Serial.println(message);
+    Serial.flush();
+  }
+}
+
+void infoPrint(const char* message) {
+  if (INFO) {
+    Serial.print(message);
+  }
+}
+
+void debugPrintln(float value, int precision = 2) {
+  if (DEBUG) {
+    Serial.println(value, precision);
+    Serial.flush();
+  }
+}
+
+void debugPrint(float value, int precision = 2) {
+  if (DEBUG) {
+    Serial.print(value, precision);
+  }
+}
+
+void infoPrintln(float value, int precision = 2) {
+  if (INFO) {
+    Serial.println(value, precision);
+    Serial.flush();
+  }
+}
+
+void infoPrint(float value, int precision = 2) {
+  if (INFO) {
+    Serial.print(value, precision);
+  }
+}
+
+void debugPrintln(int value) {
+  if (DEBUG) {
+    Serial.println(value);
+    Serial.flush();
+  }
+}
+
+void debugPrint(int value) {
+  if (DEBUG) {
+    Serial.print(value);
+  }
+}
+
+void infoPrintln(int value) {
+  if (INFO) {
+    Serial.println(value);
+    Serial.flush();
+  }
+}
+
+void infoPrint(int value) {
+  if (INFO) {
+    Serial.print(value);
+  }
+}
+
+void debugPrintln(unsigned long value) {
+  if (DEBUG) {
+    Serial.println(value);
+    Serial.flush();
+  }
+}
+
+void debugPrint(unsigned long value) {
+  if (DEBUG) {
+    Serial.print(value);
+  }
+}
+
+void infoPrintln(unsigned long value) {
+  if (INFO) {
+    Serial.println(value);
+    Serial.flush();
+  }
+}
+
+void infoPrint(unsigned long value) {
+  if (INFO) {
+    Serial.print(value);
+  }
+}
+
+// Add debug and info functions for flushing and delay when needed
+void debugFlushAndDelay(int delayMs = 100) {
+  if (DEBUG) {
+    Serial.flush();
+    if (delayMs > 0) {
+      delay(delayMs);
+    }
+  }
+}
+
+void infoFlushAndDelay(int delayMs = 100) {
+  if (INFO) {
+    Serial.flush();
+    if (delayMs > 0) {
+      delay(delayMs);
+    }
+  }
+}
+
 // Callback class for BLE server
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
-      #if DEBUG
-      Serial.println("Device connected");
-      #endif
+      infoPrintln("Device connected");
     };
 
     void onDisconnect(BLEServer* pServer) {
       deviceConnected = false;
-      #if DEBUG
-      Serial.println("Device disconnected");
-      #endif
+      infoPrintln("Device disconnected");
     }
 };
 
@@ -114,43 +240,40 @@ void setLEDColor(uint8_t r, uint8_t g, uint8_t b) {
   rgbLedWrite(RGB_BUILTIN, g, r, b);  // Swapped r and g for GRB order
 }
 
-// Initialize BLE
+// Initialize BLE as a beacon
 void initBLE() {
   // Create the BLE Device
   BLEDevice::init(DEVICE_NAME);
 
-  // Create the BLE Server
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
+  // Set maximum transmit power
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
+  infoPrintln("BLE device initialized with maximum power");
 
-  // Create the BLE Service
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-
-  // Create the BLE Characteristic
-  pCharacteristic = pService->createCharacteristic(
-                      CHARACTERISTIC_UUID,
-                      BLECharacteristic::PROPERTY_READ   |
-                      BLECharacteristic::PROPERTY_WRITE  |
-                      BLECharacteristic::PROPERTY_NOTIFY
-                    );
-
-  // Add a descriptor
-  pCharacteristic->addDescriptor(new BLE2902());
-
-  // Start the service
-  pService->start();
-
-  // Start advertising
+  // Configure advertising with maximum visibility
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
+  
+  // Prepare advertisement data with explicit flags and service UUID
+  BLEAdvertisementData advData;
+  advData.setFlags(0x06); // BR_EDR_NOT_SUPPORTED | LE General Discoverable Mode
+  advData.setCompleteServices(BLEUUID(SERVICE_UUID));
+  advData.setName(DEVICE_NAME);
+  
+  pAdvertising->setAdvertisementData(advData);
+  
+  // Set scan response data explicitly
+  BLEAdvertisementData scanResponse;
+  scanResponse.setName(DEVICE_NAME);
+  scanResponse.setCompleteServices(BLEUUID(SERVICE_UUID));
+  pAdvertising->setScanResponseData(scanResponse);
+  
+  // Configure advertising parameters for better visibility
   pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
-  pAdvertising->setMinPreferred(0x12);
-  BLEDevice::startAdvertising();
-
-  #if DEBUG
-  Serial.println("BLE initialized");
-  #endif
+  pAdvertising->setMinPreferred(0x06);  // Helps with iPhone connections
+  pAdvertising->setMaxPreferred(0x12);  // Increased visibility
+  
+  infoPrintln("BLE advertising configured for maximum visibility");
+  infoPrintln("BLE initialization complete");
 }
 
 // Deinitialize BLE to save power
@@ -163,23 +286,70 @@ void deinitBLE() {
   }
 }
 
-// Send BLE message
-void sendBLEMessage() {
-  if (!deviceConnected) {
-    #if DEBUG
-    Serial.println("No device connected, cannot send message");
-    #endif
-    return;
-  }
-
-  // Send the change detected message
-  uint8_t message = 1;  // 1 indicates change detected
-  pCharacteristic->setValue(&message, 1);
-  pCharacteristic->notify();
+// Simple beacon advertising function - doesn't wait for a connection
+void advertiseBriefly() {
+  // Don't need to create a server with a characteristic anymore
   
-  #if DEBUG
-  Serial.println("BLE message sent successfully");
-  #endif
+  // Configure advertising for better discoverability
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  
+  // Prepare advertisement data with explicit flags and service UUID
+  BLEAdvertisementData advData;
+  advData.setFlags(0x06); // BR_EDR_NOT_SUPPORTED | LE General Discoverable Mode
+  advData.setCompleteServices(BLEUUID(SERVICE_UUID));
+  advData.setName(DEVICE_NAME);
+  
+  pAdvertising->setAdvertisementData(advData);
+  
+  // Set scan response data explicitly
+  BLEAdvertisementData scanResponse;
+  scanResponse.setName(DEVICE_NAME);
+  scanResponse.setCompleteServices(BLEUUID(SERVICE_UUID));
+  pAdvertising->setScanResponseData(scanResponse);
+  
+  // Configure advertising parameters for better visibility
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // Helps with iPhone connections
+  pAdvertising->setMaxPreferred(0x12);  // Increased visibility
+  
+  // Set max TX power for maximum range
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
+  
+  // Start advertising
+  infoPrintln("Started beacon advertising");
+  pAdvertising->start();
+  
+  // Visual indication - Blue for advertising
+  setLEDColor(0, 0, RGB_BRIGHTNESS);
+  
+  // Advertise for the beacon duration
+  unsigned long startTime = millis();
+  while (millis() - startTime < BLE_BEACON_DURATION) {
+    // Blink LED to show we're advertising
+    if ((millis() / 250) % 2 == 0) {
+      setLEDColor(0, 0, RGB_BRIGHTNESS);  // Full brightness blue
+    } else {
+      setLEDColor(0, 0, RGB_BRIGHTNESS/3);  // Dimmer blue
+    }
+    
+    // Print status occasionally
+    if (millis() % 2000 < 10) {
+      infoPrint("Beacon advertising... ");
+      infoPrint((millis() - startTime) / 1000);
+      infoPrint(" of ");
+      infoPrintln(BLE_BEACON_DURATION / 1000);
+    }
+    
+    delay(50);  // Short delay to prevent CPU hogging
+  }
+  
+  // Stop advertising
+  pAdvertising->stop();
+  infoPrintln("Beacon advertising completed");
+  
+  // Turn off LED
+  setLEDColor(0, 0, 0);
 }
 
 // Save state to RTC memory before sleep
@@ -222,30 +392,21 @@ void restoreStateFromRTC() {
   baselineEstablished = rtc_baselineEstablished;
   stableReadingsCount = rtc_stableReadingsCount;
   
-  #if DEBUG
-  Serial.println("State restored from RTC memory");
-  #endif
+  infoPrintln("State restored from RTC memory");
 }
 
 void setup()
 {
   // Initialize serial first, before anything else
-  Serial.begin();
+  Serial.begin(115200);  // Use explicit baud rate
   delay(2000);  // Give serial time to initialize
   
-  Serial.println("\n\nStarting setup...");
+  Serial.println("\n\n\nMemristive Bridge Initializing...");
+  Serial.println("DEBUG is ON");  // Explicitly show debug status
+  Serial.println("INFO is ON");   // Explicitly show info status
   
-  // Set CPU frequency
-  if (!setCpuFrequencyMhz(CPU_FREQ_MHZ)) {
-    Serial.println("Failed to set CPU frequency!");
-  } else {
-    Serial.print("CPU Frequency set to: ");
-    Serial.print(getCpuFrequencyMhz());
-    Serial.println(" MHz");
-  }
-
   // Test LED
-  Serial.println("Testing LED...");
+  infoPrintln("Testing LED...");
   setLEDColor(RGB_BRIGHTNESS, 0, 0);  // Red
   delay(1000);
   setLEDColor(0, RGB_BRIGHTNESS, 0);  // Green
@@ -253,23 +414,28 @@ void setup()
   setLEDColor(0, 0, RGB_BRIGHTNESS);  // Blue
   delay(1000);
   setLEDColor(0, 0, 0);  // Off
-  Serial.println("LED test complete");
+  infoPrintln("LED test complete");
 
   // Initialize BLE
-  Serial.println("Initializing BLE...");
+  infoPrintln("Initializing BLE...");
   initBLE();
-  Serial.println("BLE initialization complete");
+  infoPrintln("BLE initialization complete");
 
   // Restore state if not first boot
-  Serial.println("Restoring state from RTC...");
+  infoPrintln("Restoring state from RTC...");
   restoreStateFromRTC();
-  Serial.println("State restoration complete");
+  infoPrintln("State restoration complete");
 
+  // Initialize I2C and ADS
+  infoPrintln("Initializing I2C and ADS...");
+  
+  // First, end any existing I2C connection
+  s3i2c.end();
+  delay(100);  // Give the bus time to settle
+  
   // Initialize I2C with explicit pins
-  Serial.println("Initializing I2C...");
-  s3i2c.end();  // End any existing I2C connection
   if (!s3i2c.begin(I2C_SDA, I2C_SCL, 100000)) {
-    Serial.println("Failed to initialize I2C!");
+    infoPrintln("Failed to initialize I2C!");
     while (1) {
       setLEDColor(0, RGB_BRIGHTNESS, 0);  // Green to indicate error
       delay(500);
@@ -277,12 +443,24 @@ void setup()
       delay(500);
     }
   }
-  Serial.println("I2C initialized successfully");
+  infoPrintln("I2C initialized successfully");
+
+  // Scan I2C bus for devices
+  infoPrintln("Scanning I2C bus...");
+  for (byte addr = 1; addr < 127; addr++) {
+    s3i2c.beginTransmission(addr);
+    byte error = s3i2c.endTransmission();
+    if (error == 0) {
+      infoPrint("I2C device found at address 0x");
+      if (addr < 16) infoPrint("0");
+      infoPrintln(addr, HEX);
+    }
+  }
 
   // Initialize ADS
-  Serial.println("Initializing ADS...");
+  infoPrintln("Initializing ADS...");
   if (!ads.begin(ADS1X15_ADDRESS, &s3i2c)) {
-    Serial.println("Failed to initialize ADS!");
+    infoPrintln("Failed to initialize ADS!");
     while (1) {
       setLEDColor(RGB_BRIGHTNESS, 0, 0);  // Red to indicate error
       delay(500);
@@ -290,9 +468,11 @@ void setup()
       delay(500);
     }
   }
-  Serial.println("ADS initialization complete");
+  infoPrintln("ADS initialization complete");
 
-  Serial.println("Setup complete!");
+  infoPrintln("Setup complete!");
+  infoPrintln("Entering main loop in 3 seconds...");
+  delay(3000);  // Pause before entering loop
 }
 
 // Calculate the average of the values in the buffer
@@ -331,13 +511,16 @@ bool isSignalStable(float stdDev) {
 bool canTrigger() {
   unsigned long currentTime = millis();
   
+  // During testing with DISABLE_SLEEP, just check minimum interval
+  if (DISABLE_SLEEP) {
+    return (currentTime - lastTriggerTime >= MIN_TRIGGER_INTERVAL);
+  }
+  
+  // Normal operation checks
   // Check if we've moved to a new hour
   if (currentTime - hourStartTime >= HOUR_MS) {
     hourStartTime = currentTime;
     triggerCount = 0;
-    #if DEBUG
-    Serial.println("New hour started, resetting trigger count");
-    #endif
   }
   
   // Check if we've exceeded the maximum triggers per hour
@@ -350,14 +533,7 @@ bool canTrigger() {
     return false;
   }
   
-  // Calculate how much of the hour has passed (0.0 to 1.0)
-  float hourProgress = (float)(currentTime - hourStartTime) / HOUR_MS;
-  
-  // Calculate the ideal number of triggers at this point in the hour
-  int idealTriggers = round(hourProgress * MAX_TRIGGERS_PER_HOUR);
-  
-  // Allow triggering if we're behind the ideal pace
-  return triggerCount < idealTriggers || (currentTime - lastTriggerTime >= MIN_TRIGGER_INTERVAL * 2);
+  return true;
 }
 
 // Handle a detected change
@@ -383,23 +559,27 @@ void handleChange(float value, float avgValue, float changeAmount) {
   // Visual indication - Green for change detected
   setLEDColor(0, RGB_BRIGHTNESS, 0);
   
-  // Send BLE message
-  sendBLEMessage();
+  // Initialize BLE for beacon advertising
+  infoPrintln("Initializing BLE for beacon advertising...");
+  initBLE();
   
-  #if DEBUG
-  Serial.print("CHANGE DETECTED! Value: ");
-  Serial.print(value);
-  Serial.print(" mV, Avg: ");
-  Serial.print(avgValue);
-  Serial.print(" mV, Change: ");
-  Serial.print(changeAmount);
-  Serial.print(" mV, New Threshold: ");
-  Serial.print(currentThreshold);
-  Serial.print(" mV, Trigger count: ");
-  Serial.print(triggerCount);
-  Serial.print("/");
-  Serial.println(MAX_TRIGGERS_PER_HOUR);
-  #endif
+  // Start beacon advertising
+  advertiseBriefly();
+  
+  // Print change information in a compact format
+  infoPrint("CHANGE: v=");
+  infoPrint(value, 4);
+  infoPrint(" avg=");
+  infoPrint(avgValue, 4);
+  infoPrint(" chg=");
+  infoPrint(changeAmount, 4);
+  infoPrint(" cnt=");
+  infoPrint(triggerCount);
+  infoPrint("/");
+  infoPrintln(MAX_TRIGGERS_PER_HOUR);
+  
+  debugPrint(" thres=");
+  debugPrintln(currentThreshold, 4);
   
   // Keep the LED on for 5 seconds
   delay(LED_ON_TIME);
@@ -414,25 +594,38 @@ void showHeartbeat() {
   
   if (currentTime - lastHeartbeatTime >= HEARTBEAT_INTERVAL) {
     // Flash the LED in soft orange/yellow (GRB order)
-    setLEDColor(RGB_BRIGHTNESS/2, RGB_BRIGHTNESS/2, 0);  // Soft orange/yellow
-    delay(200);
+    // setLEDColor(RGB_BRIGHTNESS/2, RGB_BRIGHTNESS/2, 0);  // Soft orange/yellow
+    // delay(200);
     setLEDColor(RGB_BRIGHTNESS/20, RGB_BRIGHTNESS/20, 0);  // Back to dim orange/yellow
     
     lastHeartbeatTime = currentTime;
     
-    #if DEBUG
-    Serial.println("Heartbeat");
-    #endif
+    debugPrintln("Heartbeat");
   }
 }
 
 void loop()
 {
-  #ifdef INCLUDE_ADS
+  // Basic loop start info
+  debugPrintln("\n=== LOOP START ===");
+  debugPrint("Time: ");
+  debugPrintln(millis());
+  
   int16_t results;
   float multiplier = 0.1875F; /* ADS1115 @ +/- 6.144V gain (16-bit results) */
   
-  results = ads.readADC_Differential_0_1();
+  // Read the ADS1115 with error handling
+  try {
+    results = ads.readADC_Differential_0_1();
+  } catch (...) {
+    infoPrintln("Error reading ADS1115!");
+    setLEDColor(RGB_BRIGHTNESS, 0, 0); // Red to indicate error
+    delay(1000);
+    setLEDColor(0, 0, 0);
+    delay(1000);
+    return; // Skip this loop iteration
+  }
+  
   float currentValue = results * multiplier;  // Convert to mV
   
   // Add the current value to the circular buffer
@@ -445,8 +638,6 @@ void loop()
   // Calculate statistics
   float avgValue = calculateAverage();
   float stdDev = calculateStdDev(avgValue);
-  
-  // Check if signal is stable
   bool stable = isSignalStable(stdDev);
   
   // Establish baseline if not yet established or after a period of stability
@@ -456,11 +647,8 @@ void loop()
       if (stableReadingsCount >= WINDOW_SIZE) {
         baselineValue = avgValue;
         baselineEstablished = true;
-        #if DEBUG
-        Serial.print("Baseline established: ");
-        Serial.print(baselineValue);
-        Serial.println(" mV");
-        #endif
+        infoPrint("Baseline set: ");
+        infoPrintln(baselineValue, 4);
       }
     } else {
       stableReadingsCount = 0;
@@ -478,73 +666,66 @@ void loop()
   // Update the last average
   lastAverage = avgValue;
   
-  #if DEBUG
-  // Print current readings
-  Serial.print("Differential: ");
-  Serial.print(results);
-  Serial.print("(");
-  Serial.print(currentValue);
-  Serial.print(" mV), Avg: ");
-  Serial.print(avgValue);
-  Serial.print(" mV, StdDev: ");
-  Serial.print(stdDev);
-  Serial.print(" mV, Threshold: ");
-  Serial.print(currentThreshold);
+  // Single info line with important loop data
+  infoPrint("ADS: raw=");
+  infoPrint(results);
+  infoPrint(" v=");
+  infoPrint(currentValue, 4);
+  infoPrint(" avg=");
+  infoPrint(avgValue, 4);
+  
   if (baselineEstablished) {
-    Serial.print(" mV, Baseline: ");
-    Serial.print(baselineValue);
-    Serial.print(" mV, Change: ");
-    Serial.print(changeAmount);
+    infoPrint(" base=");
+    infoPrint(baselineValue, 4);
+    infoPrint(" chg=");
+    infoPrint(changeAmount, 4);
+    infoPrint(" thres=");
+    infoPrint(currentThreshold, 4);
   }
-  Serial.println();
-  #endif
+  
+  infoPrint(" stb=");
+  infoPrintln(stable ? 1 : 0);
   
   // Check if we should trigger a change detection
-  if (bufferFilled && baselineEstablished && changeAmount > currentThreshold && canTrigger()) {
-    handleChange(currentValue, avgValue, changeAmount);
-    // Reset baseline after handling change
-    baselineEstablished = false;
-    stableReadingsCount = 0;
-  } else {
-    // If signal is stable but different from baseline, it might be a slow drift
-    if (stable && baselineEstablished && changeAmount > currentThreshold * 0.5 && canTrigger()) {
-      #if DEBUG
-      Serial.println("Stable drift detected - updating baseline");
-      #endif
+  if (bufferFilled && baselineEstablished) {
+    if (changeAmount > currentThreshold && canTrigger()) {
+      infoPrintln("*** CHANGE DETECTED ***");
+      handleChange(currentValue, avgValue, changeAmount);
+      // Reset baseline after handling change
+      baselineEstablished = false;
+      stableReadingsCount = 0;
+    } else if (stable && changeAmount > currentThreshold * 0.5 && canTrigger()) {
+      infoPrintln("*** STABLE DRIFT DETECTED ***");
       handleChange(currentValue, avgValue, changeAmount);
       baselineEstablished = true;  // Keep baseline established but updated
     }
-    
-    // Show heartbeat if needed
-    showHeartbeat();
   }
-  #endif
+    
+  // Show heartbeat if needed
+  showHeartbeat();
   
   // Save state to RTC memory
   saveStateToRTC();
   
-  #if DEBUG
-  Serial.println("Going to sleep for " + String(SLEEP_DURATION) + " seconds");
-  Serial.flush(); // Make sure all serial data is sent before sleep
-  #endif
+  debugPrintln("=== LOOP END ===");
   
   // Turn off LED before sleep
   setLEDColor(0, 0, 0);
   
+  #ifndef DISABLE_SLEEP
   // Deinitialize BLE before sleep
   deinitBLE();
   
-  #ifndef DISABLE_SLEEP
   // Go to deep sleep
   esp_sleep_enable_timer_wakeup(SLEEP_DURATION * 1000000); // Convert to microseconds
   
-  #ifdef USE_USB_CDC
-  // For ESP32-S3, disable USB CDC during sleep to prevent issues on wake
+  // Disable USB CDC during sleep to prevent issues on wake
   esp_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_OFF);
-  #endif
   
   esp_deep_sleep_start();
   #else
-  delay(SLEEP_DURATION * 1000);  // Just delay instead of sleeping
+  // Do NOT deinitialize BLE when sleep is disabled - keep the connection
+  debugPrintln("Sleep disabled - pausing briefly");
+  delay(500);  // Short delay between loop iterations
   #endif
 }

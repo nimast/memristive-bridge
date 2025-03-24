@@ -3,6 +3,7 @@
 <head>
     <title>E-ink Display Preview</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -45,209 +46,304 @@
         <div class="editor-container">
             <div class="button-group">
                 <button onclick="updateSketch()">Update Preview</button>
+                <button onclick="generateChaoticCircuit()">Generate Circuit</button>
                 <button onclick="generateRootBridgeCode()">Generate Root Bridge</button>
                 <button onclick="resetToBasicExample()">Reset to Basic Example</button>
             </div>
             <textarea id="code-editor">
-// Root Bridge Display Code
+// Memristor-Based Chaotic Circuit Generator
 epdBackground(WHITE);
 
-// Constants for bridge geometry
-const BRIDGE_GAP = 500;
-const START_LEFT = 150;
-const START_RIGHT = 650;
-const START_Y = 400;
-const NUM_ROOTS = 8;
-const MAX_POINTS = 100;
-const MAX_STEPS = 200;
+// Canvas settings
+const CANVAS_WIDTH = 1333;
+const CANVAS_HEIGHT = 1000;
+const MARGIN = 20;
 
-// Structure to store root data
-class Root {
-    constructor(startX, startY, dirX, dirY, targetX, targetY, thickness, isLeft) {
-        this.points = [{x: startX, y: startY}];
-        this.numPoints = 1;
-        this.growing = true;
-        this.dirX = dirX;
-        this.dirY = dirY;
-        this.targetX = targetX;
-        this.targetY = targetY;
-        this.thickness = thickness;
-        this.isLeft = isLeft;
-    }
+// Section dimensions
+const TITLE_HEIGHT = 70;
+const TITLE_LEFT_WIDTH = CANVAS_WIDTH / 2;
+const COMPONENTS_WIDTH = 300;  // Width of the component list section
+const COMPONENTS_HEIGHT = 150;
+const FOOTER_HEIGHT = 100;  // Height of the footer section
+
+// Draw outer border rectangle 
+epdRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, false);
+
+// Draw title section rectangles - side by side
+epdRect(0, 0, TITLE_LEFT_WIDTH, TITLE_HEIGHT, false); // Left title box
+epdRect(TITLE_LEFT_WIDTH, 0, TITLE_LEFT_WIDTH, TITLE_HEIGHT, false); // Right title box
+
+// Draw component list section rectangle - only on the left side
+epdRect(0, CANVAS_HEIGHT - COMPONENTS_HEIGHT - FOOTER_HEIGHT, COMPONENTS_WIDTH, COMPONENTS_HEIGHT, false);
+
+// Draw footer section rectangle - spans the entire width
+epdRect(0, CANVAS_HEIGHT - FOOTER_HEIGHT, CANVAS_WIDTH, FOOTER_HEIGHT, false);
+
+// Circuit elements
+const COMPONENT_TYPES = {
+    MEMRISTOR: 'memristor',
+    RESISTOR: 'resistor',
+    CAPACITOR: 'capacitor',
+    INDUCTOR: 'inductor',
+    DIODE: 'diode',
+    VOLTAGE_SOURCE: 'voltage_source',
+    GROUND: 'ground',
+    NODE: 'node'
+};
+
+// Determine circuit complexity
+const numNodes = Math.floor(Math.random() * 7) + 6;       // 6-12 nodes
+const numMemristors = Math.floor(Math.random() * 4) + 3;  // 3-6 memristors
+const numResistors = Math.floor(Math.random() * 5) + 3;   // 3-7 resistors
+const numCapacitors = Math.floor(Math.random() * 4) + 2;  // 2-5 capacitors
+const numInductors = Math.floor(Math.random() * 3) + 1;   // 1-3 inductors
+const numDiodes = Math.floor(Math.random() * 4) + 1;      // 1-4 diodes
+
+// Add title and random circuit name
+const names = ["CHUA'S CIRCUIT", "MEMRISTIVE OSCILLATOR", "ROOT-BRIDGE NETWORK", 
+               "CHAOTIC CIRCUIT", "NEUROMORPHIC EMULATOR", "ORGANIC COMPUTING NODE"];
+const nameIndex = Math.floor(Math.random() * names.length);  // Choose a random name
+
+// Draw main title - left aligned in its box
+epdText("MEMRISTOR-BASED CIRCUIT", MARGIN * 2, TITLE_HEIGHT/2 + 5, true);
+
+// Draw circuit specific name - centered in its box
+const subtitleX = TITLE_LEFT_WIDTH + (TITLE_LEFT_WIDTH / 2) - 100;
+epdText(names[nameIndex], subtitleX, TITLE_HEIGHT/2 + 5, true);
+
+// Define the circuit area - using full height between title and footer
+const CIRCUIT_AREA = {
+    x: MARGIN,
+    y: TITLE_HEIGHT + MARGIN,
+    width: CANVAS_WIDTH - MARGIN*2,
+    height: CANVAS_HEIGHT - TITLE_HEIGHT - COMPONENTS_HEIGHT - MARGIN*2
+};
+
+// Calculate the actual boundaries for circuit distribution
+const CIRCUIT_BOUNDS = {
+    left: CIRCUIT_AREA.x,
+    right: CIRCUIT_AREA.x + CIRCUIT_AREA.width,
+    top: CIRCUIT_AREA.y,
+    bottom: CANVAS_HEIGHT - COMPONENTS_HEIGHT - MARGIN,
+    centerX: CIRCUIT_AREA.x + CIRCUIT_AREA.width / 2,
+    centerY: TITLE_HEIGHT + (CANVAS_HEIGHT - TITLE_HEIGHT - COMPONENTS_HEIGHT) / 2
+};
+
+// Draw a subtle grid to visualize the circuit area (comment out in final version)
+// for(let y = CIRCUIT_BOUNDS.top; y < CIRCUIT_BOUNDS.bottom; y += 50) {
+//    epdLine(CIRCUIT_BOUNDS.left, y, CIRCUIT_BOUNDS.right, y);
+// }
+
+// Calculate grid for node distribution - using full vertical space
+const availableHeight = CIRCUIT_BOUNDS.bottom - CIRCUIT_BOUNDS.top;
+const gridCols = Math.ceil(Math.sqrt(numNodes));
+const gridRows = Math.ceil(Math.sqrt(numNodes) * 1.5); // Use more rows than columns
+
+// Calculate actual spacing to maximize space usage
+const spacingX = CIRCUIT_AREA.width / (gridCols + 1);
+const spacingY = availableHeight / (gridRows + 1);
+
+// Create nodes with positions - spread throughout the entire available space
+let nodes = [];
+
+// Helper function to add jitter to positions
+function addJitter(val, jitterAmount) {
+    return val + (Math.random() * 2 - 1) * jitterAmount;
 }
 
-// Function to draw a tree
-function drawTree(x, y, len, angle, depth) {
-    if (depth <= 0) return;
+// First create perimeter nodes to ensure use of full space
+// Top nodes
+for(let i = 0; i < 3; i++) {
+    const x = CIRCUIT_BOUNDS.left + (i+1) * (CIRCUIT_AREA.width/4);
+    const y = CIRCUIT_BOUNDS.top + spacingY * 0.8;
+    nodes.push({x, y});
+}
+
+// Bottom nodes
+for(let i = 0; i < 3; i++) {
+    const x = CIRCUIT_BOUNDS.left + (i+1) * (CIRCUIT_AREA.width/4);
+    const y = CIRCUIT_BOUNDS.bottom - spacingY * 0.8;
+    nodes.push({x, y});
+}
+
+// Left and right side nodes
+for(let i = 0; i < 2; i++) {
+    const y = CIRCUIT_BOUNDS.top + (i+1) * (availableHeight/3);
+    // Left side
+    nodes.push({x: CIRCUIT_BOUNDS.left + spacingX * 0.8, y});
+    // Right side
+    nodes.push({x: CIRCUIT_BOUNDS.right - spacingX * 0.8, y});
+}
+
+// Now add remaining nodes in the center area
+const nodesNeeded = numNodes - nodes.length;
+if(nodesNeeded > 0) {
+    const centerRows = Math.ceil(Math.sqrt(nodesNeeded));
+    const centerCols = Math.ceil(nodesNeeded / centerRows);
     
-    let endX = x + len * Math.cos(angle);
-    let endY = y + len * Math.sin(angle);
-    epdLine(x, y, endX, endY);
+    const centerWidth = CIRCUIT_AREA.width * 0.7;
+    const centerHeight = availableHeight * 0.7;
+    const centerLeft = CIRCUIT_BOUNDS.left + CIRCUIT_AREA.width * 0.15;
+    const centerTop = CIRCUIT_BOUNDS.top + availableHeight * 0.15;
     
-    if (depth > 1) {
-        let newLen = len * 0.7;
-        drawTree(endX, endY, newLen, angle - 0.5, depth - 1);
-        drawTree(endX, endY, newLen, angle + 0.5, depth - 1);
-    }
-}
-
-// Helper function for random floats
-function randomFloat(min, max) {
-    return min + (max - min) * Math.random();
-}
-
-// Draw banks - FIXED version
-// Left bank - specify end coordinates, not width/height
-epdRect(0, START_Y, START_LEFT, START_Y + 600, true);    
-// Right bank - specify end coordinates, not width/height
-epdRect(START_RIGHT, START_Y, 1333, START_Y + 600, true);
-
-// Draw trees on banks
-for(let i = 0; i < 4; i++) {
-    drawTree(20 + i * 40, START_Y, 80, -1.57, 5);  // Increased size and complexity
-}
-for(let i = 0; i < 4; i++) {
-    drawTree(670 + i * 40, START_Y, 80, -1.57, 5);  // Increased size and complexity
-}
-
-// Initialize roots
-let roots = [];
-for(let i = 0; i < NUM_ROOTS; i++) {
-    let root;
-    if(i % 2 === 0) {
-        // Left side roots
-        root = new Root(
-            START_LEFT, START_Y,
-            0.9, 
-            (i % 4 === 0) ? 0.2 : 0.35,  // Alternate between slight downward and more flat trajectories
-            START_RIGHT,
-            (i % 4 < 2) ? START_Y + 150 + (i * 20) : START_Y + 220 + (i * 20),  // Different target heights
-            3 + (i % 4),  // Increased thickness
-            true
-        );
-    } else {
-        // Right side roots
-        root = new Root(
-            START_RIGHT, START_Y,
-            -0.9, 
-            (i % 4 === 1) ? 0.2 : 0.35,  // Alternate between slight downward and more flat trajectories
-            START_LEFT,
-            (i % 4 < 2) ? START_Y + 150 + (i * 20) : START_Y + 220 + (i * 20),  // Different target heights
-            3 + (i % 4),  // Increased thickness
-            false
-        );
-    }
-    roots.push(root);
-}
-
-// Grow the roots
-let anyGrowing = true;
-let connected = new Array(NUM_ROOTS).fill(false);
-
-for(let step = 0; step < MAX_STEPS && anyGrowing; step++) {
-    anyGrowing = false;
+    const centerSpacingX = centerWidth / (centerCols + 1);
+    const centerSpacingY = centerHeight / (centerRows + 1);
     
-    for(let i = 0; i < NUM_ROOTS; i++) {
-        if(!roots[i].growing || connected[i]) continue;
-        
-        anyGrowing = true;
-        let root = roots[i];
-        let lastPoint = root.points[root.numPoints - 1];
-        
-        // Calculate direction to target
-        let dx = root.targetX - lastPoint.x;
-        let dy = root.targetY - lastPoint.y;
-        let distToTarget = Math.sqrt(dx*dx + dy*dy);
-        
-        // Update direction
-        let targetInfluence = 0.3;
-        let newDirX = (1 - targetInfluence) * root.dirX + targetInfluence * (dx / distToTarget);
-        let newDirY = (1 - targetInfluence) * root.dirY + targetInfluence * (dy / distToTarget);
-        
-        // Add varied bias based on root index for diversity
-        if (i % 4 < 2) {
-            // Flatter trajectory with small downward bias
-            newDirY += 0.05;
-        } else {
-            // More hanging trajectory
-            newDirY += 0.15;
-        }
-        
-        // Add random variation
-        newDirX += randomFloat(-0.05, 0.05);
-        newDirY += randomFloat(-0.05, 0.05);
-        
-        // Normalize direction
-        let len = Math.sqrt(newDirX * newDirX + newDirY * newDirY);
-        root.dirX = newDirX / len;
-        root.dirY = newDirY / len;
-        
-        // Calculate new point
-        let newPoint = {
-            x: Math.round(lastPoint.x + root.dirX * 15),
-            y: Math.round(lastPoint.y + root.dirY * 15)
-        };
-        
-        // Draw root segment with increased thickness
-        for(let t = 0; t < root.thickness; t++) {
-            epdLine(lastPoint.x, lastPoint.y + t, 
-                  newPoint.x, newPoint.y + t);
-        }
-        
-        // Check for connections
-        for(let j = 0; j < NUM_ROOTS; j++) {
-            if(i === j || roots[i].isLeft === roots[j].isLeft) continue;
-            
-            for(let k = 0; k < roots[j].numPoints; k++) {
-                let point = roots[j].points[k];
-                let connDx = newPoint.x - point.x;
-                let connDy = newPoint.y - point.y;
-                let dist = Math.sqrt(connDx*connDx + connDy*connDy);
-                
-                if(dist < 45) {  // Increased connection distance
-                    let connThickness = Math.max(root.thickness, roots[j].thickness);
-                    for(let t = 0; t < connThickness; t++) {
-                        epdLine(newPoint.x, newPoint.y + t,
-                             point.x, point.y + t);
-                    }
-                    connected[i] = true;
-                    connected[j] = true;
-                    root.growing = false;
-                    break;
-                }
-            }
-            if(connected[i]) break;
-        }
-        
-        // Add point if still growing
-        if(root.growing && root.numPoints < MAX_POINTS) {
-            root.points.push(newPoint);
-            root.numPoints++;
-            
-            // Check growth bounds
-            if((root.isLeft && newPoint.x > START_RIGHT) ||
-               (!root.isLeft && newPoint.x < START_LEFT) ||
-               newPoint.y < START_Y || newPoint.y > START_Y + 350) {  // Adjusted bounds
-                root.growing = false;
-            }
+    let nodesPlaced = 0;
+    for(let row = 0; row < centerRows && nodesPlaced < nodesNeeded; row++) {
+        for(let col = 0; col < centerCols && nodesPlaced < nodesNeeded; col++) {
+            const x = centerLeft + (col + 1) * centerSpacingX;
+            const y = centerTop + (row + 1) * centerSpacingY;
+            // Add jitter to positions to avoid grid-like appearance
+            nodes.push({x: addJitter(x, centerSpacingX * 0.3), y: addJitter(y, centerSpacingY * 0.3)});
+            nodesPlaced++;
         }
     }
 }
 
-// Add hanging roots - longer and thicker
-for(let i = 0; i < NUM_ROOTS; i++) {
-    for(let j = 1; j < roots[i].numPoints; j += 3) {  // More frequent hanging roots
-        if(randomFloat(0, 1) < 0.4) {  // Increased probability
-            let point = roots[i].points[j];
-            let hangLen = Math.round(randomFloat(15, 30));  // Longer hangers
-            let hangX = Math.round(randomFloat(-5, 5));
-            for(let t = 0; t < 3; t++) {  // Thicker hangers
-                epdLine(point.x, point.y,
-                     point.x + hangX, point.y + hangLen + t);
-            }
-        }
-    }
+// Draw all nodes
+for (let i = 0; i < nodes.length; i++) {
+    epdCircle(nodes[i].x, nodes[i].y, 5, true);
 }
+
+// Draw ground symbol at node 0
+const groundNode = nodes[0];
+const groundX = groundNode.x;
+const groundY = groundNode.y + 30;
+epdLine(groundNode.x, groundNode.y, groundX, groundY);
+epdLine(groundX - 15, groundY, groundX + 15, groundY);
+epdLine(groundX - 10, groundY + 5, groundX + 10, groundY + 5);
+epdLine(groundX - 5, groundY + 10, groundX + 5, groundY + 10);
+
+// Add voltage source between node 1 and ground node
+const sourceX = (nodes[1].x + groundNode.x) / 2;
+const sourceY = (nodes[1].y + groundNode.y) / 2;
+const radius = 25;
+
+epdCircle(sourceX, sourceY, radius, false);
+epdText("+", sourceX - 5, sourceY - 8);
+epdLine(sourceX - 7, sourceY + 8, sourceX + 7, sourceY + 8);
+epdLine(nodes[1].x, nodes[1].y, sourceX - radius, sourceY);
+epdLine(groundNode.x, groundNode.y, sourceX + radius, sourceY);
+
+// Helper function to find a random node pair
+function getRandomNodePair() {
+    const node1 = Math.floor(Math.random() * nodes.length);
+    let node2;
+    do {
+        node2 = Math.floor(Math.random() * nodes.length);
+    } while (node1 === node2);
+    
+    return {node1, node2};
+}
+
+// Draw memristors
+for (let i = 0; i < numMemristors; i++) {
+    const {node1, node2} = getRandomNodePair();
+    const compX = (nodes[node1].x + nodes[node2].x) / 2;
+    const compY = (nodes[node1].y + nodes[node2].y) / 2;
+    
+    // Draw memristor (rectangular with M)
+    const width = 60;
+    const height = 30;
+    
+    epdRect(compX - width/2, compY - height/2, width, height, false);
+    epdText("M", compX - 5, compY - 8);
+    
+    // Draw connecting lines
+    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
+    epdLine(nodes[node2].x, nodes[node2].y, compX + width/2, compY);
+}
+
+// Draw resistors
+for (let i = 0; i < numResistors; i++) {
+    const {node1, node2} = getRandomNodePair();
+    const compX = (nodes[node1].x + nodes[node2].x) / 2;
+    const compY = (nodes[node1].y + nodes[node2].y) / 2;
+    const width = 50;
+    const height = 20;
+    
+    // Draw zigzag resistor
+    const startX = compX - width/2;
+    const endX = compX + width/2;
+    
+    epdLine(nodes[node1].x, nodes[node1].y, startX, compY);
+    epdLine(startX, compY, startX + 5, compY - height/2);
+    epdLine(startX + 5, compY - height/2, startX + 15, compY + height/2);
+    epdLine(startX + 15, compY + height/2, startX + 25, compY - height/2);
+    epdLine(startX + 25, compY - height/2, startX + 35, compY + height/2);
+    epdLine(startX + 35, compY + height/2, startX + 45, compY - height/2);
+    epdLine(startX + 45, compY - height/2, endX, compY);
+    epdLine(endX, compY, nodes[node2].x, nodes[node2].y);
+}
+
+// Draw capacitors
+for (let i = 0; i < numCapacitors; i++) {
+    const {node1, node2} = getRandomNodePair();
+    const compX = (nodes[node1].x + nodes[node2].x) / 2;
+    const compY = (nodes[node1].y + nodes[node2].y) / 2;
+    const width = 40;
+    const plateSpacing = 10;
+    
+    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
+    epdLine(compX - width/2, compY - 15, compX - width/2, compY + 15);
+    epdLine(compX - width/2 + plateSpacing, compY - 15, compX - width/2 + plateSpacing, compY + 15);
+    epdLine(compX - width/2 + plateSpacing, compY, nodes[node2].x, nodes[node2].y);
+}
+
+// Draw inductors
+for (let i = 0; i < numInductors; i++) {
+    const {node1, node2} = getRandomNodePair();
+    const compX = (nodes[node1].x + nodes[node2].x) / 2;
+    const compY = (nodes[node1].y + nodes[node2].y) / 2;
+    const width = 60;
+    const loopRadius = 6;
+    
+    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
+    
+    // Draw loops
+    for (let j = 0; j < 4; j++) {
+        const loopX = compX - width/2 + 10 + j * 15;
+        epdCircle(loopX, compY, loopRadius, false);
+    }
+    
+    epdLine(compX + width/2 - 5, compY, nodes[node2].x, nodes[node2].y);
+}
+
+// Draw diodes
+for (let i = 0; i < numDiodes; i++) {
+    const {node1, node2} = getRandomNodePair();
+    const compX = (nodes[node1].x + nodes[node2].x) / 2;
+    const compY = (nodes[node1].y + nodes[node2].y) / 2;
+    const width = 30;
+    const height = 20;
+    
+    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
+    
+    // Triangle
+    epdLine(compX - width/2, compY - height/2, compX - width/2, compY + height/2);
+    epdLine(compX - width/2, compY - height/2, compX + width/2, compY);
+    epdLine(compX - width/2, compY + height/2, compX + width/2, compY);
+    
+    // Line
+    epdLine(compX + width/2, compY - height/2, compX + width/2, compY + height/2);
+    
+    epdLine(compX + width/2, compY, nodes[node2].x, nodes[node2].y);
+}
+
+// Add component counts in the component list section - removing the "COMPONENTS:" title
+const componentStartX = 30;
+const componentStartY = CANVAS_HEIGHT - COMPONENTS_HEIGHT - FOOTER_HEIGHT + 30;
+epdText("MEMRISTORS: " + numMemristors, componentStartX, componentStartY);
+epdText("RESISTORS: " + numResistors, componentStartX, componentStartY + 20);
+epdText("CAPACITORS: " + numCapacitors, componentStartX, componentStartY + 40);
+epdText("INDUCTORS: " + numInductors, componentStartX, componentStartY + 60);
+epdText("DIODES: " + numDiodes, componentStartX, componentStartY + 80);
+
+// Add sample measurements in footer
+const footerY = CANVAS_HEIGHT - FOOTER_HEIGHT + 40;
+epdText("TIME: " + Math.floor(Date.now()/1000) + " s", 30, footerY);
+epdText("SAMPLE: " + (Math.floor(Math.random() * 900) + 100), 30, footerY + 30);
             </textarea>
         </div>
     </div>
@@ -325,6 +421,11 @@ for(let i = 0; i < NUM_ROOTS; i++) {
             const canvas = createCanvas(1333, 1000);
             canvas.parent('canvas-container');
             background(255);
+            
+            // Initialize random seed
+            if (Math.seedrandom) {
+                Math.seedrandom(Date.now().toString());
+            }
             
             // Make Display methods globally available with 'epd' prefix
             window.epdPoint = DisplaySimulator.point;
@@ -461,16 +562,29 @@ epdText("My House", 150, 220, true);`;
         });
 
         function generateRootBridgeCode() {
-            let code = `// Root Bridge Generation with Trees
+            // Force a new random seed
+            if (Math.seedrandom) {
+                Math.seedrandom(Date.now());
+            }
+            
+            // Clear previous content
+            clear();
+            background(255);
+            
+            // Create and execute simple code to display a root bridge
+            let code = `// Indigenous Root Bridge Display
 epdBackground(WHITE);
 
-// Constants for bridge geometry
-const BRIDGE_GAP = 500;  // Distance between banks
+// Constants
 const START_LEFT = 150;
 const START_RIGHT = 650;
 const START_Y = 400;
 
-// L-system tree function
+// Draw banks
+epdRect(0, START_Y, START_LEFT, START_Y + 600, true);  // Left bank
+epdRect(START_RIGHT, START_Y, 1333, START_Y + 600, true);  // Right bank
+
+// Draw trees
 function drawTree(x, y, len, angle, depth) {
     if (depth <= 0) return;
     
@@ -485,148 +599,133 @@ function drawTree(x, y, len, angle, depth) {
     }
 }
 
-// Draw banks
-epdRect(0, START_Y, START_LEFT, 600, true);    // left bank
-epdRect(START_RIGHT, START_Y, 683, 600, true);  // right bank
+// Create trees on each bank
+const leftTrees = [];
+const rightTrees = [];
 
-// Draw trees on banks
+// Draw several trees on each bank
 for(let i = 0; i < 5; i++) {
-    drawTree(20 + i * 30, START_Y, 40, -Math.PI/2, 4);
-}
-for(let i = 0; i < 5; i++) {
-    drawTree(670 + i * 30, START_Y, 40, -Math.PI/2, 4);
-}
-
-// Initialize roots with better targeting
-const roots = [`;
-
-            // Generate initial root positions with improved targeting
-            const NUM_ROOTS = 8;
-            for(let i = 0; i < NUM_ROOTS; i++) {
-                let targetY = 300 + (i * 25); // Higher target for better arc
-                if(i % 2 === 0) {
-                    code += `
-    {x: START_LEFT, y: START_Y, dirX: 0.9, dirY: -0.4, targetX: START_RIGHT, targetY: ${targetY}, thickness: ${2 + (i % 3)}, side: "left"},  // left root ${i}`;
-                } else {
-                    code += `
-    {x: START_RIGHT, y: START_Y, dirX: -0.9, dirY: -0.4, targetX: START_LEFT, targetY: ${targetY}, thickness: ${2 + (i % 3)}, side: "right"},  // right root ${i}`;
-                }
-            }
-            code += `
-];
-
-// Grow and connect roots
-let growing = new Array(${NUM_ROOTS}).fill(true);
-let points = roots.map(root => [{x: root.x, y: root.y}]);
-let connected = new Array(${NUM_ROOTS}).fill(false);
-
-// Simulate growth with improved parameters
-const MAX_STEPS = 200;  // Increased maximum steps
-let anyGrowing = true;
-
-for(let step = 0; step < MAX_STEPS && anyGrowing; step++) {
-    anyGrowing = false;
+    // Left trees
+    let leftX = 20 + i * 40;
+    let leftY = START_Y;
+    leftTrees.push({x: leftX, y: leftY});
+    drawTree(leftX, leftY, 80, -Math.PI/2, 5);
     
-    for(let i = 0; i < roots.length; i++) {
-        if(!growing[i] || connected[i]) continue;
+    // Right trees
+    let rightX = 670 + i * 40;
+    let rightY = START_Y;
+    rightTrees.push({x: rightX, y: rightY});
+    drawTree(rightX, rightY, 80, -Math.PI/2, 5);
+}
+
+// Draw bridge roots connecting trees
+const NUM_ROOTS = 8;
+
+for(let i = 0; i < NUM_ROOTS; i++) {
+    // Determine start and end points
+    let startX, startY, endX, endY;
+    let prevX, prevY;
+    let treeIdx = i % 5;
+    let sourceTreeIdx = i % 5;  // Choose source tree based on root index
+    
+    if(i % 2 === 0) {
+        // Left to right - start from bottom of left tree
+        startX = leftTrees[sourceTreeIdx].x;
+        startY = leftTrees[sourceTreeIdx].y;  // Exactly at the base/bottom of the tree
+        endX = rightTrees[treeIdx].x;
+        endY = rightTrees[treeIdx].y - 30 - (i % 3) * 15;  // Target higher up tree
+        prevX = startX;
+        prevY = startY;
+    } else {
+        // Right to left - start from bottom of right tree
+        startX = rightTrees[sourceTreeIdx].x;
+        startY = rightTrees[sourceTreeIdx].y;  // Exactly at the base/bottom of the tree
+        endX = leftTrees[treeIdx].x;
+        endY = leftTrees[treeIdx].y - 30 - (i % 3) * 15;  // Target higher up tree
+        prevX = startX;
+        prevY = startY;
+    }
+    
+    // Generate points between start and end with some natural curve
+    const numSegments = 20;
+    const thickness = 2 + (i % 3);
+    
+    // Draw initial point
+    for(let t = 0; t < thickness; t++) {
+        epdLine(startX, startY + t, startX, startY + t);
+    }
+    
+    // Generate path with slight curve and more pronounced downward dangle
+    for(let j = 1; j <= numSegments; j++) {
+        const progress = j / numSegments;
+        const invProgress = 1 - progress;
         
-        anyGrowing = true;
-        let root = roots[i];
-        let lastPoint = points[i][points[i].length - 1];
+        // Calculate next point with a much more pronounced downward arc
+        // Create a deeper dip in the middle by increasing the midpoint Y value
+        const midY = Math.max(startY, endY) + 80 + (i % 3) * 20; // Significantly increased arc height for deeper dangle
         
-        // Calculate direction to target
-        let dx = root.targetX - lastPoint.x;
-        let dy = root.targetY - lastPoint.y;
-        let distToTarget = Math.sqrt(dx*dx + dy*dy);
-        
-        // Stronger influence towards target
-        let targetInfluence = 0.3;
-        let newDirX = (1 - targetInfluence) * root.dirX + targetInfluence * (dx / distToTarget);
-        let newDirY = (1 - targetInfluence) * root.dirY + targetInfluence * (dy / distToTarget);
-        
-        // Add slight upward bias for better arching
-        newDirY -= 0.1;
-        
-        // Add small random variation
-        newDirX += random(-0.05, 0.05);
-        newDirY += random(-0.05, 0.05);
-        
-        // Normalize direction
-        let len = Math.sqrt(newDirX * newDirX + newDirY * newDirY);
-        root.dirX = newDirX / len;
-        root.dirY = newDirY / len;
-        
-        // Calculate new point
-        let stepLength = 15;
-        let newPoint = {
-            x: lastPoint.x + root.dirX * stepLength,
-            y: lastPoint.y + root.dirY * stepLength
-        };
-        
-        // Draw line segment with root thickness
-        for(let t = 0; t < root.thickness; t++) {
-            epdLine(
-                lastPoint.x, 
-                lastPoint.y + t, 
-                newPoint.x, 
-                newPoint.y + t
-            );
+        // Apply stronger downward curve at the middle of the bridge
+        let arcModifier = 1;
+        if (progress > 0.3 && progress < 0.7) {
+            // Increase the dip even more in the middle section
+            arcModifier = 1.5;
         }
         
-        // Check for connections with other roots
-        for(let j = 0; j < roots.length; j++) {
-            if(i === j || root.side === roots[j].side) continue;  // Skip same side roots
-            
-            for(let point of points[j]) {
-                let connDx = newPoint.x - point.x;
-                let connDy = newPoint.y - point.y;
-                let dist = Math.sqrt(connDx*connDx + connDy*connDy);
-                
-                if(dist < 40) {  // Connection radius
-                    // Draw thicker connection
-                    let connThickness = Math.max(root.thickness, roots[j].thickness);
-                    for(let t = 0; t < connThickness; t++) {
-                        epdLine(
-                            newPoint.x, 
-                            newPoint.y + t, 
-                            point.x, 
-                            point.y + t
-                        );
-                    }
-                    connected[i] = true;
-                    connected[j] = true;
-                    growing[i] = false;
-                    break;
-                }
-            }
-            if(connected[i]) break;
+        const arcY = startY * invProgress * invProgress + 
+                    midY * 2 * progress * invProgress * arcModifier + 
+                    endY * progress * progress;
+        
+        // Linear interpolation for x
+        const nextX = startX * invProgress + endX * progress;
+        const nextY = arcY;
+        
+        // Draw segment with thickness
+        for(let t = 0; t < thickness; t++) {
+            epdLine(prevX, prevY + t, nextX, nextY + t);
         }
         
-        // Add point to array if still growing
-        if(growing[i]) {
-            points[i].push(newPoint);
-            
-            // Check if root should stop growing
-            if(root.side === "left" && newPoint.x > START_RIGHT ||
-               root.side === "right" && newPoint.x < START_LEFT ||
-               points[i].length > 100 ||  // Increased max points
-               newPoint.y < 100 || newPoint.y > 500) {  // Vertical bounds
-                growing[i] = false;
+        // Add more hanging roots with increased length, especially in the middle
+        const hangingProbability = (progress > 0.3 && progress < 0.7) ? 0.6 : 0.4; // Higher probability in middle
+        if(j % 3 === 0 && j > 3 && j < numSegments - 3 || (Math.random() < hangingProbability && j % 2 === 0)) {
+            const hangLen = 15 + Math.random() * 25;
+            // Make middle hangers even longer
+            const extraLength = (progress > 0.3 && progress < 0.7) ? 15 : 0;
+            for(let t = 0; t < thickness - 1; t++) {
+                epdLine(nextX, nextY + t, nextX + (Math.random() * 10 - 5), nextY + hangLen + extraLength + t);
             }
         }
+        
+        prevX = nextX;
+        prevY = nextY;
+    }
+    
+    // Connect final point to tree
+    for(let t = 0; t < thickness; t++) {
+        epdLine(prevX, prevY + t, endX, endY + t);
     }
 }
 
-// Add hanging roots for detail
-for(let i = 0; i < roots.length; i++) {
-    for(let j = 1; j < points[i].length; j += 4) {
-        let point = points[i][j];
-        if(random() < 0.3) {
-            let hangLen = random(10, 20);
-            let hangX = random(-5, 5);
-            for(let t = 0; t < 2; t++) {
-                epdLine(point.x, point.y, point.x + hangX, point.y + hangLen + t);
-            }
+// Add climbing tendrils on trees
+for(let side = 0; side < 2; side++) {
+    const trees = side === 0 ? leftTrees : rightTrees;
+    
+    for(let i = 0; i < trees.length; i++) {
+        const treeX = trees[i].x;
+        const treeY = trees[i].y;
+        
+        // Draw 2-3 tendrils per tree
+        for(let j = 0; j < 2 + Math.floor(Math.random() * 2); j++) {
+            const startY = treeY - 10 - Math.random() * 30;
+            const endY = startY - 15 - Math.random() * 15;
+            
+            // Create wavy pattern for climbing tendril
+            const dir = side === 0 ? 1 : -1;
+            const midX1 = treeX + dir * (5 + Math.random() * 5);
+            const midX2 = treeX - dir * (5 + Math.random() * 5);
+            
+            epdLine(treeX, startY, midX1, startY - 7);
+            epdLine(midX1, startY - 7, midX2, startY - 14);
+            epdLine(midX2, startY - 14, treeX, endY);
         }
     }
 }`;
@@ -637,8 +736,314 @@ for(let i = 0; i < roots.length; i++) {
             updateSketch();
         }
 
-        // Modify the button click handler
-        document.querySelector('button:nth-child(2)').onclick = generateRootBridgeCode;
+        // Modify the button click handlers
+        document.querySelector('button:nth-child(2)').onclick = generateChaoticCircuit;
+        document.querySelector('button:nth-child(3)').onclick = generateRootBridgeCode;
+        
+        function generateChaoticCircuit() {
+            // Force a new random seed for each generation
+            if (Math.seedrandom) {
+                Math.seedrandom(Date.now() + Math.random().toString());
+            }
+            
+            // Clear any previous content
+            clear();
+            background(255);
+            
+            let code = `// Memristor-Based Chaotic Circuit Generator
+epdBackground(WHITE);
+
+// Canvas settings
+const CANVAS_WIDTH = 1333;
+const CANVAS_HEIGHT = 1000;
+const MARGIN = 20;
+
+// Section dimensions
+const TITLE_HEIGHT = 70;
+const TITLE_LEFT_WIDTH = CANVAS_WIDTH / 2;
+const COMPONENTS_WIDTH = 300;  // Width of the component list section
+const COMPONENTS_HEIGHT = 150;
+const FOOTER_HEIGHT = 100;  // Height of the footer section
+
+// Draw outer border rectangle 
+epdRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, false);
+
+// Draw title section rectangles - side by side
+epdRect(0, 0, TITLE_LEFT_WIDTH, TITLE_HEIGHT, false); // Left title box
+epdRect(TITLE_LEFT_WIDTH, 0, TITLE_LEFT_WIDTH, TITLE_HEIGHT, false); // Right title box
+
+// Draw component list section rectangle - only on the left side
+epdRect(0, CANVAS_HEIGHT - COMPONENTS_HEIGHT - FOOTER_HEIGHT, COMPONENTS_WIDTH, COMPONENTS_HEIGHT, false);
+
+// Draw footer section rectangle - spans the entire width
+epdRect(0, CANVAS_HEIGHT - FOOTER_HEIGHT, CANVAS_WIDTH, FOOTER_HEIGHT, false);
+
+// Circuit elements
+const COMPONENT_TYPES = {
+    MEMRISTOR: 'memristor',
+    RESISTOR: 'resistor',
+    CAPACITOR: 'capacitor',
+    INDUCTOR: 'inductor',
+    DIODE: 'diode',
+    VOLTAGE_SOURCE: 'voltage_source',
+    GROUND: 'ground',
+    NODE: 'node'
+};
+
+// Determine circuit complexity
+const numNodes = Math.floor(Math.random() * 7) + 6;       // 6-12 nodes
+const numMemristors = Math.floor(Math.random() * 4) + 3;  // 3-6 memristors
+const numResistors = Math.floor(Math.random() * 5) + 3;   // 3-7 resistors
+const numCapacitors = Math.floor(Math.random() * 4) + 2;  // 2-5 capacitors
+const numInductors = Math.floor(Math.random() * 3) + 1;   // 1-3 inductors
+const numDiodes = Math.floor(Math.random() * 4) + 1;      // 1-4 diodes
+
+// Add title and random circuit name
+const names = ["CHUA'S CIRCUIT", "MEMRISTIVE OSCILLATOR", "ROOT-BRIDGE NETWORK", 
+               "CHAOTIC CIRCUIT", "NEUROMORPHIC EMULATOR", "ORGANIC COMPUTING NODE"];
+const nameIndex = Math.floor(Math.random() * names.length);  // Choose a random name
+
+// Draw main title - left aligned in its box
+epdText("MEMRISTOR-BASED CIRCUIT", MARGIN * 2, TITLE_HEIGHT/2 + 5, true);
+
+// Draw circuit specific name - centered in its box
+const subtitleX = TITLE_LEFT_WIDTH + (TITLE_LEFT_WIDTH / 2) - 100;
+epdText(names[nameIndex], subtitleX, TITLE_HEIGHT/2 + 5, true);
+
+// Define the circuit area - using full height between title and footer
+const CIRCUIT_AREA = {
+    x: MARGIN,
+    y: TITLE_HEIGHT + MARGIN,
+    width: CANVAS_WIDTH - MARGIN*2,
+    height: CANVAS_HEIGHT - TITLE_HEIGHT - COMPONENTS_HEIGHT - MARGIN*2
+};
+
+// Calculate the actual boundaries for circuit distribution
+const CIRCUIT_BOUNDS = {
+    left: CIRCUIT_AREA.x,
+    right: CIRCUIT_AREA.x + CIRCUIT_AREA.width,
+    top: CIRCUIT_AREA.y,
+    bottom: CANVAS_HEIGHT - COMPONENTS_HEIGHT - MARGIN,
+    centerX: CIRCUIT_AREA.x + CIRCUIT_AREA.width / 2,
+    centerY: TITLE_HEIGHT + (CANVAS_HEIGHT - TITLE_HEIGHT - COMPONENTS_HEIGHT) / 2
+};
+
+// Calculate grid for node distribution - using full vertical space
+const availableHeight = CIRCUIT_BOUNDS.bottom - CIRCUIT_BOUNDS.top;
+const gridCols = Math.ceil(Math.sqrt(numNodes));
+const gridRows = Math.ceil(Math.sqrt(numNodes) * 1.5); // Use more rows than columns
+
+// Calculate actual spacing to maximize space usage
+const spacingX = CIRCUIT_AREA.width / (gridCols + 1);
+const spacingY = availableHeight / (gridRows + 1);
+
+// Create nodes with positions - spread throughout the entire available space
+let nodes = [];
+
+// Helper function to add jitter to positions
+function addJitter(val, jitterAmount) {
+    return val + (Math.random() * 2 - 1) * jitterAmount;
+}
+
+// First create perimeter nodes to ensure use of full space
+// Top nodes
+for(let i = 0; i < 3; i++) {
+    const x = CIRCUIT_BOUNDS.left + (i+1) * (CIRCUIT_AREA.width/4);
+    const y = CIRCUIT_BOUNDS.top + spacingY * 0.8;
+    nodes.push({x, y});
+}
+
+// Bottom nodes
+for(let i = 0; i < 3; i++) {
+    const x = CIRCUIT_BOUNDS.left + (i+1) * (CIRCUIT_AREA.width/4);
+    const y = CIRCUIT_BOUNDS.bottom - spacingY * 0.8;
+    nodes.push({x, y});
+}
+
+// Left and right side nodes
+for(let i = 0; i < 2; i++) {
+    const y = CIRCUIT_BOUNDS.top + (i+1) * (availableHeight/3);
+    // Left side
+    nodes.push({x: CIRCUIT_BOUNDS.left + spacingX * 0.8, y});
+    // Right side
+    nodes.push({x: CIRCUIT_BOUNDS.right - spacingX * 0.8, y});
+}
+
+// Now add remaining nodes in the center area
+const nodesNeeded = numNodes - nodes.length;
+if(nodesNeeded > 0) {
+    const centerRows = Math.ceil(Math.sqrt(nodesNeeded));
+    const centerCols = Math.ceil(nodesNeeded / centerRows);
+    
+    const centerWidth = CIRCUIT_AREA.width * 0.7;
+    const centerHeight = availableHeight * 0.7;
+    const centerLeft = CIRCUIT_BOUNDS.left + CIRCUIT_AREA.width * 0.15;
+    const centerTop = CIRCUIT_BOUNDS.top + availableHeight * 0.15;
+    
+    const centerSpacingX = centerWidth / (centerCols + 1);
+    const centerSpacingY = centerHeight / (centerRows + 1);
+    
+    let nodesPlaced = 0;
+    for(let row = 0; row < centerRows && nodesPlaced < nodesNeeded; row++) {
+        for(let col = 0; col < centerCols && nodesPlaced < nodesNeeded; col++) {
+            const x = centerLeft + (col + 1) * centerSpacingX;
+            const y = centerTop + (row + 1) * centerSpacingY;
+            // Add jitter to positions to avoid grid-like appearance
+            nodes.push({x: addJitter(x, centerSpacingX * 0.3), y: addJitter(y, centerSpacingY * 0.3)});
+            nodesPlaced++;
+        }
+    }
+}
+
+// Draw all nodes
+for (let i = 0; i < nodes.length; i++) {
+    epdCircle(nodes[i].x, nodes[i].y, 5, true);
+}
+
+// Draw ground symbol at node 0
+const groundNode = nodes[0];
+const groundX = groundNode.x;
+const groundY = groundNode.y + 30;
+epdLine(groundNode.x, groundNode.y, groundX, groundY);
+epdLine(groundX - 15, groundY, groundX + 15, groundY);
+epdLine(groundX - 10, groundY + 5, groundX + 10, groundY + 5);
+epdLine(groundX - 5, groundY + 10, groundX + 5, groundY + 10);
+
+// Add voltage source between node 1 and ground node
+const sourceX = (nodes[1].x + groundNode.x) / 2;
+const sourceY = (nodes[1].y + groundNode.y) / 2;
+const radius = 25;
+
+epdCircle(sourceX, sourceY, radius, false);
+epdText("+", sourceX - 5, sourceY - 8);
+epdLine(sourceX - 7, sourceY + 8, sourceX + 7, sourceY + 8);
+epdLine(nodes[1].x, nodes[1].y, sourceX - radius, sourceY);
+epdLine(groundNode.x, groundNode.y, sourceX + radius, sourceY);
+
+// Helper function to find a random node pair
+function getRandomNodePair() {
+    const node1 = Math.floor(Math.random() * nodes.length);
+    let node2;
+    do {
+        node2 = Math.floor(Math.random() * nodes.length);
+    } while (node1 === node2);
+    
+    return {node1, node2};
+}
+
+// Draw memristors
+for (let i = 0; i < numMemristors; i++) {
+    const {node1, node2} = getRandomNodePair();
+    const compX = (nodes[node1].x + nodes[node2].x) / 2;
+    const compY = (nodes[node1].y + nodes[node2].y) / 2;
+    
+    // Draw memristor (rectangular with M)
+    const width = 60;
+    const height = 30;
+    
+    epdRect(compX - width/2, compY - height/2, width, height, false);
+    epdText("M", compX - 5, compY - 8);
+    
+    // Draw connecting lines
+    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
+    epdLine(nodes[node2].x, nodes[node2].y, compX + width/2, compY);
+}
+
+// Draw resistors
+for (let i = 0; i < numResistors; i++) {
+    const {node1, node2} = getRandomNodePair();
+    const compX = (nodes[node1].x + nodes[node2].x) / 2;
+    const compY = (nodes[node1].y + nodes[node2].y) / 2;
+    const width = 50;
+    const height = 20;
+    
+    // Draw zigzag resistor
+    const startX = compX - width/2;
+    const endX = compX + width/2;
+    
+    epdLine(nodes[node1].x, nodes[node1].y, startX, compY);
+    epdLine(startX, compY, startX + 5, compY - height/2);
+    epdLine(startX + 5, compY - height/2, startX + 15, compY + height/2);
+    epdLine(startX + 15, compY + height/2, startX + 25, compY - height/2);
+    epdLine(startX + 25, compY - height/2, startX + 35, compY + height/2);
+    epdLine(startX + 35, compY + height/2, startX + 45, compY - height/2);
+    epdLine(startX + 45, compY - height/2, endX, compY);
+    epdLine(endX, compY, nodes[node2].x, nodes[node2].y);
+}
+
+// Draw capacitors
+for (let i = 0; i < numCapacitors; i++) {
+    const {node1, node2} = getRandomNodePair();
+    const compX = (nodes[node1].x + nodes[node2].x) / 2;
+    const compY = (nodes[node1].y + nodes[node2].y) / 2;
+    const width = 40;
+    const plateSpacing = 10;
+    
+    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
+    epdLine(compX - width/2, compY - 15, compX - width/2, compY + 15);
+    epdLine(compX - width/2 + plateSpacing, compY - 15, compX - width/2 + plateSpacing, compY + 15);
+    epdLine(compX - width/2 + plateSpacing, compY, nodes[node2].x, nodes[node2].y);
+}
+
+// Draw inductors
+for (let i = 0; i < numInductors; i++) {
+    const {node1, node2} = getRandomNodePair();
+    const compX = (nodes[node1].x + nodes[node2].x) / 2;
+    const compY = (nodes[node1].y + nodes[node2].y) / 2;
+    const width = 60;
+    const loopRadius = 6;
+    
+    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
+    
+    // Draw loops
+    for (let j = 0; j < 4; j++) {
+        const loopX = compX - width/2 + 10 + j * 15;
+        epdCircle(loopX, compY, loopRadius, false);
+    }
+    
+    epdLine(compX + width/2 - 5, compY, nodes[node2].x, nodes[node2].y);
+}
+
+// Draw diodes
+for (let i = 0; i < numDiodes; i++) {
+    const {node1, node2} = getRandomNodePair();
+    const compX = (nodes[node1].x + nodes[node2].x) / 2;
+    const compY = (nodes[node1].y + nodes[node2].y) / 2;
+    const width = 30;
+    const height = 20;
+    
+    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
+    
+    // Triangle
+    epdLine(compX - width/2, compY - height/2, compX - width/2, compY + height/2);
+    epdLine(compX - width/2, compY - height/2, compX + width/2, compY);
+    epdLine(compX - width/2, compY + height/2, compX + width/2, compY);
+    
+    // Line
+    epdLine(compX + width/2, compY - height/2, compX + width/2, compY + height/2);
+    
+    epdLine(compX + width/2, compY, nodes[node2].x, nodes[node2].y);
+}
+
+// Add component counts in the component list section - removing the "COMPONENTS:" title
+const componentStartX = 30;
+const componentStartY = CANVAS_HEIGHT - COMPONENTS_HEIGHT - FOOTER_HEIGHT + 30;
+epdText("MEMRISTORS: " + numMemristors, componentStartX, componentStartY);
+epdText("RESISTORS: " + numResistors, componentStartX, componentStartY + 20);
+epdText("CAPACITORS: " + numCapacitors, componentStartX, componentStartY + 40);
+epdText("INDUCTORS: " + numInductors, componentStartX, componentStartY + 60);
+epdText("DIODES: " + numDiodes, componentStartX, componentStartY + 80);
+
+// Add sample measurements in footer
+const footerY = CANVAS_HEIGHT - FOOTER_HEIGHT + 40;
+epdText("TIME: " + Math.floor(Date.now()/1000) + " s", 30, footerY);
+epdText("SAMPLE: " + (Math.floor(Math.random() * 900) + 100), 30, footerY + 30);`;
+
+            // Update the code editor
+            document.getElementById('code-editor').value = code;
+            // Trigger the preview update
+            updateSketch();
+        }
     </script>
 </body>
 </html> 

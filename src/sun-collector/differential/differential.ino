@@ -8,8 +8,8 @@
 #include <esp_now.h>
 #include <WiFi.h>
 
-#define I2C_SDA 8
-#define I2C_SCL 9
+#define I2C_SDA 34
+#define I2C_SCL 33
 #define PIN 21
 #define DELAYVAL 500
 #define LED_ON_TIME 5000  // 5 seconds in milliseconds
@@ -67,6 +67,7 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 
 void setup()
 {
+  delay(2000);
   Serial.begin(9600);
   delay(2000);
   Serial.println("Hello! gonna fire up LEDS");

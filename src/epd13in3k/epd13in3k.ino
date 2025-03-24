@@ -7,6 +7,13 @@
 #include "Display.h"
 #include <esp_now.h>
 #include <WiFi.h>
+#include <Adafruit_NeoPixel.h>
+
+// LED configuration
+#define RGB_LED 21  // Onboard RGB LED pin
+#define HEARTBEAT_INTERVAL 5000  // 5 seconds
+unsigned long lastHeartbeatTime = 0;
+bool initialDisplay = true;  // Flag to track if it's the first display update
 
 // Constants for bridge geometry
 const int BRIDGE_GAP = 500;
@@ -44,10 +51,15 @@ typedef struct message_struct {
 Root roots[NUM_ROOTS];
 bool displayUpdateRequested = false;
 
+// Initialize NeoPixel
+Adafruit_NeoPixel pixels(1, RGB_LED, NEO_GRB + NEO_KHZ800);
+
 // Function declarations
 void drawTree(int x, int y, int len, float angle, int depth);
 float randomFloat(float min, float max);
 void drawBridgeDisplay();
+void heartbeatLED();
+void flashLEDOnTransmission();
 
 // Callback function for ESP-NOW data reception
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
@@ -60,6 +72,9 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   if (receivedData.changeDetected) {
     Serial.println("Change detected! Updating display...");
     displayUpdateRequested = true;
+    
+    // Flash LED on transmission received
+    flashLEDOnTransmission();
   }
 }
 
@@ -67,6 +82,38 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
 void setup()
 {
     Serial.begin(9600);
+    
+    // Initialize NeoPixel LED
+    Serial.println("Initializing LED...");
+    pixels.begin();           // Initialize NeoPixel
+    pixels.setBrightness(50); // Medium brightness for visibility
+    pixels.clear();           // Turn off LED
+    pixels.show();
+    delay(500);              // Give LED time to initialize
+    
+    // Double blink at startup to confirm LED is working
+    // First blink - green
+    pixels.setPixelColor(0, pixels.Color(0, 50, 0));  // GRB format: (Green, Red, Blue)
+    pixels.show();
+    delay(500);
+    pixels.clear();
+    pixels.show();
+    delay(500);
+    
+    // Second blink - blue 
+    pixels.setPixelColor(0, pixels.Color(0, 0, 50));  // GRB format: (Green, Red, Blue)
+    pixels.show();
+    delay(500);
+    pixels.clear();
+    pixels.show();
+    delay(500);
+    
+    Serial.println("LED initialized!");
+    
+    // Set very dim red for normal operation
+    pixels.setPixelColor(0, pixels.Color(0, 2, 0));  // Very dim red - GRB format
+    pixels.show();
+    
     DEV_Module_Init();
     
     // Set device as a Wi-Fi Station
@@ -95,8 +142,11 @@ void setup()
 
 // Function to draw the bridge display
 void drawBridgeDisplay() {
-    // Reset the display without reinitializing
-    Display::background(WHITE);
+    // Only clear the background on first display
+    if (initialDisplay) {
+        Display::background(WHITE);
+        initialDisplay = false;
+    }
     
     // Draw banks - FIXED version
     // Left bank - specify end coordinates, not width/height
@@ -238,14 +288,72 @@ void drawBridgeDisplay() {
     
     Display::show();
     
-    // Wait for the specified delay time
-    delay(DISPLAY_DELAY);
-    
-    Display::background(WHITE);
-    Display::show();
-
     // Reset the flag
     displayUpdateRequested = false;
+}
+
+// Function to create a subtle heartbeat effect on the LED
+void heartbeatLED() {
+    // First pulse
+    pixels.setPixelColor(0, pixels.Color(0, 20, 0));  // GRB format: Red
+    pixels.show();
+    delay(50);
+    pixels.setPixelColor(0, pixels.Color(0, 100, 0));  // Brighter red
+    pixels.show();
+    delay(100);
+    pixels.setPixelColor(0, pixels.Color(0, 0, 0));   // Off
+    pixels.show();
+    delay(100);
+    
+    // Second pulse (stronger)
+    pixels.setPixelColor(0, pixels.Color(0, 30, 0));  // Medium red
+    pixels.show();
+    delay(50);
+    pixels.setPixelColor(0, pixels.Color(0, 150, 0)); // Bright red
+    pixels.show();
+    delay(100);
+    pixels.setPixelColor(0, pixels.Color(0, 0, 0));   // Off
+    pixels.show();
+    
+    // Set very dim red for normal operation
+    pixels.setPixelColor(0, pixels.Color(0, 2, 0));  // Very dim red - GRB format
+    pixels.show();
+}
+
+// Function to create a more elaborate flashing when receiving transmission
+void flashLEDOnTransmission() {
+    // Bright white flash
+    for (int i = 0; i < 3; i++) {
+        pixels.setPixelColor(0, pixels.Color(100, 200, 100)); // Bright white (GRB format)
+        pixels.show();
+        delay(50);
+        pixels.setPixelColor(0, pixels.Color(0, 0, 0));       // Off
+        pixels.show();
+        delay(50);
+    }
+    
+    // Blue to purple swirl
+    for (int i = 0; i < 5; i++) {
+        // Blue
+        pixels.setPixelColor(0, pixels.Color(200, 0, 0));  // GRB format: Blue
+        pixels.show();
+        delay(100);
+        // Purple
+        pixels.setPixelColor(0, pixels.Color(100, 0, 200)); // GRB format: Purple
+        pixels.show();
+        delay(100);
+    }
+    
+    // Fade out
+    for (int i = 150; i > 0; i -= 10) {
+        pixels.setPixelColor(0, pixels.Color(i/3, 0, i));
+        pixels.show();
+        delay(10);
+    }
+    
+    // Set very dim red for normal operation
+    pixels.setPixelColor(0, pixels.Color(0, 2, 0));  // Very dim red - GRB format
+    pixels.show();
 }
 
 void drawTree(int x, int y, int len, float angle, int depth) {
@@ -275,6 +383,13 @@ void loop()
     drawBridgeDisplay();
   }
   
+  // Check if it's time for a heartbeat
+  unsigned long currentTime = millis();
+  if (currentTime - lastHeartbeatTime >= HEARTBEAT_INTERVAL) {
+    heartbeatLED();
+    lastHeartbeatTime = currentTime;
+  }
+  
   // Small delay to prevent CPU hogging
-  delay(100);
+  delay(10);
 }

@@ -49,20 +49,205 @@
                 <button onclick="resetToBasicExample()">Reset to Basic Example</button>
             </div>
             <textarea id="code-editor">
-// Your drawing code here
+// Root Bridge Display Code
 epdBackground(WHITE);
 
-// Draw a house
-epdRect(100, 100, 200, 150, false);    // house frame
-epdRect(150, 160, 50, 90, false);      // door
-epdRect(270, 130, 40, 40, false);      // window
+// Constants for bridge geometry
+const BRIDGE_GAP = 500;
+const START_LEFT = 150;
+const START_RIGHT = 650;
+const START_Y = 400;
+const NUM_ROOTS = 8;
+const MAX_POINTS = 100;
+const MAX_STEPS = 200;
 
-// Roof (triangle using lines)
-epdLine(100, 100, 200, 50);
-epdLine(200, 50, 300, 100);
+// Structure to store root data
+class Root {
+    constructor(startX, startY, dirX, dirY, targetX, targetY, thickness, isLeft) {
+        this.points = [{x: startX, y: startY}];
+        this.numPoints = 1;
+        this.growing = true;
+        this.dirX = dirX;
+        this.dirY = dirY;
+        this.targetX = targetX;
+        this.targetY = targetY;
+        this.thickness = thickness;
+        this.isLeft = isLeft;
+    }
+}
 
-// Add some text
-epdText("My House", 150, 220, true);
+// Function to draw a tree
+function drawTree(x, y, len, angle, depth) {
+    if (depth <= 0) return;
+    
+    let endX = x + len * Math.cos(angle);
+    let endY = y + len * Math.sin(angle);
+    epdLine(x, y, endX, endY);
+    
+    if (depth > 1) {
+        let newLen = len * 0.7;
+        drawTree(endX, endY, newLen, angle - 0.5, depth - 1);
+        drawTree(endX, endY, newLen, angle + 0.5, depth - 1);
+    }
+}
+
+// Helper function for random floats
+function randomFloat(min, max) {
+    return min + (max - min) * Math.random();
+}
+
+// Draw banks - FIXED version
+// Left bank - specify end coordinates, not width/height
+epdRect(0, START_Y, START_LEFT, START_Y + 600, true);    
+// Right bank - specify end coordinates, not width/height
+epdRect(START_RIGHT, START_Y, 1333, START_Y + 600, true);
+
+// Draw trees on banks
+for(let i = 0; i < 4; i++) {
+    drawTree(20 + i * 40, START_Y, 80, -1.57, 5);  // Increased size and complexity
+}
+for(let i = 0; i < 4; i++) {
+    drawTree(670 + i * 40, START_Y, 80, -1.57, 5);  // Increased size and complexity
+}
+
+// Initialize roots
+let roots = [];
+for(let i = 0; i < NUM_ROOTS; i++) {
+    let root;
+    if(i % 2 === 0) {
+        // Left side roots
+        root = new Root(
+            START_LEFT, START_Y,
+            0.9, 
+            (i % 4 === 0) ? 0.2 : 0.35,  // Alternate between slight downward and more flat trajectories
+            START_RIGHT,
+            (i % 4 < 2) ? START_Y + 150 + (i * 20) : START_Y + 220 + (i * 20),  // Different target heights
+            3 + (i % 4),  // Increased thickness
+            true
+        );
+    } else {
+        // Right side roots
+        root = new Root(
+            START_RIGHT, START_Y,
+            -0.9, 
+            (i % 4 === 1) ? 0.2 : 0.35,  // Alternate between slight downward and more flat trajectories
+            START_LEFT,
+            (i % 4 < 2) ? START_Y + 150 + (i * 20) : START_Y + 220 + (i * 20),  // Different target heights
+            3 + (i % 4),  // Increased thickness
+            false
+        );
+    }
+    roots.push(root);
+}
+
+// Grow the roots
+let anyGrowing = true;
+let connected = new Array(NUM_ROOTS).fill(false);
+
+for(let step = 0; step < MAX_STEPS && anyGrowing; step++) {
+    anyGrowing = false;
+    
+    for(let i = 0; i < NUM_ROOTS; i++) {
+        if(!roots[i].growing || connected[i]) continue;
+        
+        anyGrowing = true;
+        let root = roots[i];
+        let lastPoint = root.points[root.numPoints - 1];
+        
+        // Calculate direction to target
+        let dx = root.targetX - lastPoint.x;
+        let dy = root.targetY - lastPoint.y;
+        let distToTarget = Math.sqrt(dx*dx + dy*dy);
+        
+        // Update direction
+        let targetInfluence = 0.3;
+        let newDirX = (1 - targetInfluence) * root.dirX + targetInfluence * (dx / distToTarget);
+        let newDirY = (1 - targetInfluence) * root.dirY + targetInfluence * (dy / distToTarget);
+        
+        // Add varied bias based on root index for diversity
+        if (i % 4 < 2) {
+            // Flatter trajectory with small downward bias
+            newDirY += 0.05;
+        } else {
+            // More hanging trajectory
+            newDirY += 0.15;
+        }
+        
+        // Add random variation
+        newDirX += randomFloat(-0.05, 0.05);
+        newDirY += randomFloat(-0.05, 0.05);
+        
+        // Normalize direction
+        let len = Math.sqrt(newDirX * newDirX + newDirY * newDirY);
+        root.dirX = newDirX / len;
+        root.dirY = newDirY / len;
+        
+        // Calculate new point
+        let newPoint = {
+            x: Math.round(lastPoint.x + root.dirX * 15),
+            y: Math.round(lastPoint.y + root.dirY * 15)
+        };
+        
+        // Draw root segment with increased thickness
+        for(let t = 0; t < root.thickness; t++) {
+            epdLine(lastPoint.x, lastPoint.y + t, 
+                  newPoint.x, newPoint.y + t);
+        }
+        
+        // Check for connections
+        for(let j = 0; j < NUM_ROOTS; j++) {
+            if(i === j || roots[i].isLeft === roots[j].isLeft) continue;
+            
+            for(let k = 0; k < roots[j].numPoints; k++) {
+                let point = roots[j].points[k];
+                let connDx = newPoint.x - point.x;
+                let connDy = newPoint.y - point.y;
+                let dist = Math.sqrt(connDx*connDx + connDy*connDy);
+                
+                if(dist < 45) {  // Increased connection distance
+                    let connThickness = Math.max(root.thickness, roots[j].thickness);
+                    for(let t = 0; t < connThickness; t++) {
+                        epdLine(newPoint.x, newPoint.y + t,
+                             point.x, point.y + t);
+                    }
+                    connected[i] = true;
+                    connected[j] = true;
+                    root.growing = false;
+                    break;
+                }
+            }
+            if(connected[i]) break;
+        }
+        
+        // Add point if still growing
+        if(root.growing && root.numPoints < MAX_POINTS) {
+            root.points.push(newPoint);
+            root.numPoints++;
+            
+            // Check growth bounds
+            if((root.isLeft && newPoint.x > START_RIGHT) ||
+               (!root.isLeft && newPoint.x < START_LEFT) ||
+               newPoint.y < START_Y || newPoint.y > START_Y + 350) {  // Adjusted bounds
+                root.growing = false;
+            }
+        }
+    }
+}
+
+// Add hanging roots - longer and thicker
+for(let i = 0; i < NUM_ROOTS; i++) {
+    for(let j = 1; j < roots[i].numPoints; j += 3) {  // More frequent hanging roots
+        if(randomFloat(0, 1) < 0.4) {  // Increased probability
+            let point = roots[i].points[j];
+            let hangLen = Math.round(randomFloat(15, 30));  // Longer hangers
+            let hangX = Math.round(randomFloat(-5, 5));
+            for(let t = 0; t < 3; t++) {  // Thicker hangers
+                epdLine(point.x, point.y,
+                     point.x + hangX, point.y + hangLen + t);
+            }
+        }
+    }
+}
             </textarea>
         </div>
     </div>
@@ -315,19 +500,19 @@ for(let i = 0; i < 5; i++) {
 // Initialize roots with better targeting
 const roots = [`;
 
-        // Generate initial root positions with improved targeting
-        const NUM_ROOTS = 8;
-        for(let i = 0; i < NUM_ROOTS; i++) {
-            let targetY = 300 + (i * 25); // Higher target for better arc
-            if(i % 2 === 0) {
-                code += `
+            // Generate initial root positions with improved targeting
+            const NUM_ROOTS = 8;
+            for(let i = 0; i < NUM_ROOTS; i++) {
+                let targetY = 300 + (i * 25); // Higher target for better arc
+                if(i % 2 === 0) {
+                    code += `
     {x: START_LEFT, y: START_Y, dirX: 0.9, dirY: -0.4, targetX: START_RIGHT, targetY: ${targetY}, thickness: ${2 + (i % 3)}, side: "left"},  // left root ${i}`;
-            } else {
-                code += `
+                } else {
+                    code += `
     {x: START_RIGHT, y: START_Y, dirX: -0.9, dirY: -0.4, targetX: START_LEFT, targetY: ${targetY}, thickness: ${2 + (i % 3)}, side: "right"},  // right root ${i}`;
+                }
             }
-        }
-        code += `
+            code += `
 ];
 
 // Grow and connect roots

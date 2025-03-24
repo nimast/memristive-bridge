@@ -155,35 +155,44 @@ void drawBridgeDisplay() {
     Display::rect(START_RIGHT, START_Y, EPD_13IN3K_WIDTH, START_Y + 600, true);
     
     // Draw trees on banks
-    for(int i = 0; i < 5; i++) {
-        drawTree(20 + i * 30, START_Y, 40, -1.57, 4);  // -1.57 ≈ -PI/2
+    for(int i = 0; i < 4; i++) {
+        drawTree(20 + i * 40, START_Y, 80, -1.57, 5);  // Increased size and complexity
     }
-    for(int i = 0; i < 5; i++) {
-        drawTree(670 + i * 30, START_Y, 40, -1.57, 4);
+    for(int i = 0; i < 4; i++) {
+        drawTree(670 + i * 40, START_Y, 80, -1.57, 5);  // Increased size and complexity
     }
     
     // Initialize roots
     for(int i = 0; i < NUM_ROOTS; i++) {
         roots[i].numPoints = 1;
         roots[i].growing = true;
-        roots[i].thickness = 2 + (i % 3);
+        roots[i].thickness = 3 + (i % 4);  // Increased thickness
         
         if(i % 2 == 0) {
             // Left side roots
             roots[i].points[0] = {START_LEFT, START_Y};
             roots[i].dirX = 0.9;
-            roots[i].dirY = -0.4;
+            // Alternate between slight downward and more flat trajectories
+            roots[i].dirY = (i % 4 == 0) ? 0.2 : 0.35;  // Reduced downward bias for some roots
             roots[i].targetX = START_RIGHT;
             roots[i].isLeft = true;
         } else {
             // Right side roots
             roots[i].points[0] = {START_RIGHT, START_Y};
             roots[i].dirX = -0.9;
-            roots[i].dirY = -0.4;
+            // Alternate between slight downward and more flat trajectories
+            roots[i].dirY = (i % 4 == 1) ? 0.2 : 0.35;  // Reduced downward bias for some roots
             roots[i].targetX = START_LEFT;
             roots[i].isLeft = false;
         }
-        roots[i].targetY = 300 + (i * 25);
+        // Set different target heights
+        if (i % 4 < 2) {
+            // Higher bridges
+            roots[i].targetY = START_Y + 150 + (i * 20);  // Less drop for some roots
+        } else {
+            // Lower bridges
+            roots[i].targetY = START_Y + 220 + (i * 20);  // More drop for others
+        }
     }
     
     // Grow the roots
@@ -210,8 +219,16 @@ void drawBridgeDisplay() {
             float newDirX = (1 - targetInfluence) * root->dirX + targetInfluence * (dx / distToTarget);
             float newDirY = (1 - targetInfluence) * root->dirY + targetInfluence * (dy / distToTarget);
             
-            // Add upward bias and random variation
-            newDirY -= 0.1;
+            // Add varied bias based on root index for diversity
+            if (i % 4 < 2) {
+                // Flatter trajectory with small downward bias
+                newDirY += 0.05;
+            } else {
+                // More hanging trajectory
+                newDirY += 0.15;
+            }
+            
+            // Add random variation
             newDirX += randomFloat(-0.05, 0.05);
             newDirY += randomFloat(-0.05, 0.05);
             
@@ -226,7 +243,7 @@ void drawBridgeDisplay() {
                 (int16_t)(lastPoint->y + root->dirY * 15)
             };
             
-            // Draw root segment
+            // Draw root segment with increased thickness
             for(uint8_t t = 0; t < root->thickness; t++) {
                 Display::line(lastPoint->x, lastPoint->y + t, 
                             newPoint.x, newPoint.y + t);
@@ -242,7 +259,7 @@ void drawBridgeDisplay() {
                     float connDy = newPoint.y - point->y;
                     float dist = sqrt(connDx*connDx + connDy*connDy);
                     
-                    if(dist < 40) {
+                    if(dist < 45) {  // Increased connection distance
                         uint8_t connThickness = max(root->thickness, roots[j].thickness);
                         for(uint8_t t = 0; t < connThickness; t++) {
                             Display::line(newPoint.x, newPoint.y + t,
@@ -264,21 +281,21 @@ void drawBridgeDisplay() {
                 // Check growth bounds
                 if((root->isLeft && newPoint.x > START_RIGHT) ||
                    (!root->isLeft && newPoint.x < START_LEFT) ||
-                   newPoint.y < 100 || newPoint.y > 500) {
+                   newPoint.y < START_Y || newPoint.y > START_Y + 350) {  // Adjusted bounds
                     root->growing = false;
                 }
             }
         }
     }
     
-    // Add hanging roots
+    // Add hanging roots - longer and thicker
     for(int i = 0; i < NUM_ROOTS; i++) {
-        for(int j = 1; j < roots[i].numPoints; j += 4) {
-            if(randomFloat(0, 1) < 0.3) {
+        for(int j = 1; j < roots[i].numPoints; j += 3) {  // More frequent hanging roots
+            if(randomFloat(0, 1) < 0.4) {  // Increased probability
                 Point* point = &roots[i].points[j];
-                int hangLen = random(10, 20);
+                int hangLen = random(15, 30);  // Longer hangers
                 int hangX = random(-5, 5);
-                for(int t = 0; t < 2; t++) {
+                for(int t = 0; t < 3; t++) {  // Thicker hangers
                     Display::line(point->x, point->y,
                                 point->x + hangX, point->y + hangLen + t);
                 }

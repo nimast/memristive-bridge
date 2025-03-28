@@ -1,7 +1,7 @@
 #define INCLUDE_ADS
 //#define DEBUG 
-#define INFO
-//#define SLEEP_ENABLED  
+//#define INFO
+#define SLEEP_ENABLED  
 //#define DEBUG_TRANSMISSION
 
 #ifdef INCLUDE_ADS
@@ -64,16 +64,21 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 
 // Move large arrays to RTC memory to prevent stack overflow
 RTC_DATA_ATTR float values[WINDOW_SIZE];            // Circular buffer for recent values
+RTC_DATA_ATTR float values2[WINDOW_SIZE];           // Second circular buffer for recent values
 RTC_DATA_ATTR int valueIndex = 0;                   // Current index in the circular buffer
 RTC_DATA_ATTR float currentThreshold = MIN_THRESHOLD; // Current adaptive threshold
 RTC_DATA_ATTR unsigned long lastTriggerTime = 0;    // Time of the last trigger
 RTC_DATA_ATTR unsigned long hourStartTime = 0;      // Start time of the current hour
 RTC_DATA_ATTR int triggerCount = 0;                 // Number of triggers in the current hour
 RTC_DATA_ATTR float lastAverage = 0;                // Last calculated average
+RTC_DATA_ATTR float lastAverage2 = 0;               // Last calculated average for second reading
 RTC_DATA_ATTR bool bufferFilled = false;            // Flag to indicate if the buffer is filled
 RTC_DATA_ATTR float baselineValue = 0;              // Baseline value for comparison
+RTC_DATA_ATTR float baselineValue2 = 0;             // Baseline value for second reading
 RTC_DATA_ATTR bool baselineEstablished = false;     // Flag to indicate if baseline is established
+RTC_DATA_ATTR bool baselineEstablished2 = false;    // Flag to indicate if baseline is established for second reading
 RTC_DATA_ATTR int stableReadingsCount = 0;          // Count of consecutive stable readings
+RTC_DATA_ATTR int stableReadingsCount2 = 0;         // Count of consecutive stable readings for second reading
 RTC_DATA_ATTR unsigned long lastHeartbeatTime = 0;  // Time of the last heartbeat
 RTC_DATA_ATTR bool rtc_firstBoot = true;            // First boot flag
 
@@ -228,6 +233,7 @@ void setup()
   if (rtc_firstBoot) {
     for (int i = 0; i < WINDOW_SIZE; i++) {
       values[i] = 0;
+      values2[i] = 0;
     }
 
     // Initialize timing variables
@@ -243,27 +249,27 @@ void setup()
 }
 
 // Calculate the average of the values in the buffer
-float calculateAverage() {
+float calculateAverage(float* buffer, bool isFilled, int currentIndex) {
   float sum = 0;
-  int count = bufferFilled ? WINDOW_SIZE : valueIndex;
+  int count = isFilled ? WINDOW_SIZE : currentIndex;
   
   if (count == 0) return 0;
   
   for (int i = 0; i < count; i++) {
-    sum += values[i];
+    sum += buffer[i];
   }
   return sum / count;
 }
 
 // Calculate the standard deviation of the values in the buffer
-float calculateStdDev(float avg) {
+float calculateStdDev(float* buffer, float avg, bool isFilled, int currentIndex) {
   float sumSquares = 0;
-  int count = bufferFilled ? WINDOW_SIZE : valueIndex;
+  int count = isFilled ? WINDOW_SIZE : currentIndex;
   
   if (count <= 1) return 0;
   
   for (int i = 0; i < count; i++) {
-    float diff = values[i] - avg;
+    float diff = buffer[i] - avg;
     sumSquares += diff * diff;
   }
   return sqrt(sumSquares / (count - 1));
@@ -411,26 +417,34 @@ void loop()
 {
   #ifdef INCLUDE_ADS
   int16_t results;
+  int16_t results2;
   float multiplier = 0.1875F; /* ADS1115 @ +/- 6.144V gain (16-bit results) */
   
+  // Read both differential pairs
   results = ads.readADC_Differential_0_1();
+  results2 = ads.readADC_Differential_2_3();
   float currentValue = results * multiplier;  // Convert to mV
+  float currentValue2 = results2 * multiplier;  // Convert to mV
   
-  // Add the current value to the circular buffer
+  // Add the current values to the circular buffers
   values[valueIndex] = currentValue;
+  values2[valueIndex] = currentValue2;
   valueIndex = (valueIndex + 1) % WINDOW_SIZE;
   if (valueIndex == 0) {
     bufferFilled = true;
   }
   
-  // Calculate statistics
-  float avgValue = calculateAverage();
-  float stdDev = calculateStdDev(avgValue);
+  // Calculate statistics for both readings
+  float avgValue = calculateAverage(values, bufferFilled, valueIndex);
+  float avgValue2 = calculateAverage(values2, bufferFilled, valueIndex);
+  float stdDev = calculateStdDev(values, avgValue, bufferFilled, valueIndex);
+  float stdDev2 = calculateStdDev(values2, avgValue2, bufferFilled, valueIndex);
   
-  // Check if signal is stable
+  // Check if signals are stable
   bool stable = isSignalStable(stdDev);
+  bool stable2 = isSignalStable(stdDev2);
   
-  // Establish baseline if not yet established or after a period of stability
+  // Establish baselines if not yet established or after a period of stability
   if (!baselineEstablished) {
     if (stable) {
       stableReadingsCount++;
@@ -438,14 +452,12 @@ void loop()
         baselineValue = avgValue;
         baselineEstablished = true;
         #if defined(DEBUG) || defined(INFO)
-        Serial.print("Baseline established: ");
+        Serial.print("Baseline 1 established: ");
         Serial.print(baselineValue);
         Serial.println(" mV");
         #endif
       }
     } else {
-      // Special case: if all values so far are exactly 0, establish a baseline of 0
-      // This helps with the common case where sensors start at 0 before real readings
       bool allZeros = true;
       for (int i = 0; i < (bufferFilled ? WINDOW_SIZE : valueIndex); i++) {
         if (values[i] != 0) {
@@ -454,32 +466,73 @@ void loop()
         }
       }
       
-      if (allZeros && valueIndex >= 2) {  // Require at least 2 zeros before establishing baseline
+      if (allZeros && valueIndex >= 2) {
         baselineValue = 0;
         baselineEstablished = true;
         #if defined(DEBUG) || defined(INFO)
-        Serial.println("Zero baseline established from consecutive zero readings");
+        Serial.println("Zero baseline 1 established from consecutive zero readings");
         #endif
       } else {
         stableReadingsCount = 0;
       }
     }
   }
+
+  if (!baselineEstablished2) {
+    if (stable2) {
+      stableReadingsCount2++;
+      if (stableReadingsCount2 >= WINDOW_SIZE) {
+        baselineValue2 = avgValue2;
+        baselineEstablished2 = true;
+        #if defined(DEBUG) || defined(INFO)
+        Serial.print("Baseline 2 established: ");
+        Serial.print(baselineValue2);
+        Serial.println(" mV");
+        #endif
+      }
+    } else {
+      bool allZeros = true;
+      for (int i = 0; i < (bufferFilled ? WINDOW_SIZE : valueIndex); i++) {
+        if (values2[i] != 0) {
+          allZeros = false;
+          break;
+        }
+      }
+      
+      if (allZeros && valueIndex >= 2) {
+        baselineValue2 = 0;
+        baselineEstablished2 = true;
+        #if defined(DEBUG) || defined(INFO)
+        Serial.println("Zero baseline 2 established from consecutive zero readings");
+        #endif
+      } else {
+        stableReadingsCount2 = 0;
+      }
+    }
+  }
   
-  // Calculate change relative to baseline or last average
+  // Calculate changes relative to baselines or last averages
   float changeAmount;
+  float changeAmount2;
   if (baselineEstablished) {
     changeAmount = abs(avgValue - baselineValue);
   } else {
     changeAmount = abs(avgValue - lastAverage);
   }
   
-  // Update the last average
+  if (baselineEstablished2) {
+    changeAmount2 = abs(avgValue2 - baselineValue2);
+  } else {
+    changeAmount2 = abs(avgValue2 - lastAverage2);
+  }
+  
+  // Update the last averages
   lastAverage = avgValue;
+  lastAverage2 = avgValue2;
   
   #if defined(DEBUG) || defined(INFO)
   // Print current readings
-  Serial.print("Differential: ");
+  Serial.print("Differential 1: ");
   Serial.print(results);
   Serial.print("(");
   Serial.print(currentValue);
@@ -496,38 +549,72 @@ void loop()
     Serial.print(changeAmount);
   }
   Serial.println();
+  
+  Serial.print("Differential 2: ");
+  Serial.print(results2);
+  Serial.print("(");
+  Serial.print(currentValue2);
+  Serial.print(" mV), Avg: ");
+  Serial.print(avgValue2);
+  Serial.print(" mV, StdDev: ");
+  Serial.print(stdDev2);
+  Serial.print(" mV, Threshold: ");
+  Serial.print(currentThreshold);
+  if (baselineEstablished2) {
+    Serial.print(" mV, Baseline: ");
+    Serial.print(baselineValue2);
+    Serial.print(" mV, Change: ");
+    Serial.print(changeAmount2);
+  }
+  Serial.println();
   #endif
   
-  // Check if we should trigger a change detection
-  if ((bufferFilled && baselineEstablished && changeAmount > currentThreshold && canTrigger()) || 
-      (bufferFilled && baselineEstablished && changeAmount > ABSOLUTE_CHANGE_THRESHOLD && canTrigger()) ||
-      // Add detection for significant change from zero baseline
-      (bufferFilled && baselineEstablished && isChangeFromZero(avgValue, baselineValue) && canTrigger()) ||
-      // Add detection for unstable transitions with significant magnitude
-      (bufferFilled && baselineEstablished && baselineValue == 0 && !stable && abs(avgValue) > ZERO_TO_NONZERO_THRESHOLD * 3 && canTrigger())) {
-    
+  // Check if either reading should trigger a change detection
+  bool shouldTrigger = false;
+  if (bufferFilled && baselineEstablished && baselineEstablished2) {
+    shouldTrigger = 
+      (changeAmount > currentThreshold && canTrigger()) || 
+      (changeAmount > ABSOLUTE_CHANGE_THRESHOLD && canTrigger()) ||
+      (isChangeFromZero(avgValue, baselineValue) && canTrigger()) ||
+      (baselineValue == 0 && !stable && abs(avgValue) > ZERO_TO_NONZERO_THRESHOLD * 3 && canTrigger()) ||
+      (changeAmount2 > currentThreshold && canTrigger()) ||
+      (changeAmount2 > ABSOLUTE_CHANGE_THRESHOLD && canTrigger()) ||
+      (isChangeFromZero(avgValue2, baselineValue2) && canTrigger()) ||
+      (baselineValue2 == 0 && !stable2 && abs(avgValue2) > ZERO_TO_NONZERO_THRESHOLD * 3 && canTrigger());
+  }
+  
+  if (shouldTrigger) {
     #if defined(DEBUG) || defined(INFO)
-    if (changeAmount > ABSOLUTE_CHANGE_THRESHOLD) {
+    if (changeAmount > ABSOLUTE_CHANGE_THRESHOLD || changeAmount2 > ABSOLUTE_CHANGE_THRESHOLD) {
       Serial.println("Large absolute change detected!");
-    } else if (isChangeFromZero(avgValue, baselineValue)) {
+    } else if (isChangeFromZero(avgValue, baselineValue) || isChangeFromZero(avgValue2, baselineValue2)) {
       Serial.println("Change from zero baseline detected!");
-    } else if (baselineValue == 0 && !stable && abs(avgValue) > ZERO_TO_NONZERO_THRESHOLD * 3) {
+    } else if ((baselineValue == 0 && !stable && abs(avgValue) > ZERO_TO_NONZERO_THRESHOLD * 3) ||
+               (baselineValue2 == 0 && !stable2 && abs(avgValue2) > ZERO_TO_NONZERO_THRESHOLD * 3)) {
       Serial.println("Unstable transition from zero detected!");
     }
     #endif
     
-    handleChange(currentValue, avgValue, changeAmount);
-    // Reset baseline after handling change
+    // Use the larger change amount for threshold adjustment
+    float maxChange = max(changeAmount, changeAmount2);
+    handleChange(max(avgValue, avgValue2), max(avgValue, avgValue2), maxChange);
+    
+    // Reset both baselines after handling change
     baselineEstablished = false;
+    baselineEstablished2 = false;
     stableReadingsCount = 0;
+    stableReadingsCount2 = 0;
   } else {
-    // If signal is stable but different from baseline, it might be a slow drift
-    if (stable && baselineEstablished && changeAmount > currentThreshold * 0.5 && canTrigger()) {
+    // If either signal is stable but different from baseline, it might be a slow drift
+    if ((stable && baselineEstablished && changeAmount > currentThreshold * 0.5 && canTrigger()) ||
+        (stable2 && baselineEstablished2 && changeAmount2 > currentThreshold * 0.5 && canTrigger())) {
       #if defined(DEBUG) || defined(INFO)
       Serial.println("Stable drift detected - updating baseline");
       #endif
-      handleChange(currentValue, avgValue, changeAmount);
-      baselineEstablished = true;  // Keep baseline established but updated
+      float maxChange = max(changeAmount, changeAmount2);
+      handleChange(max(avgValue, avgValue2), max(avgValue, avgValue2), maxChange);
+      baselineEstablished = true;  // Keep baselines established but updated
+      baselineEstablished2 = true;
     }
     
     // Show heartbeat if needed
@@ -565,10 +652,11 @@ void loop()
   #ifdef DEBUG
   Serial.println("4. Final preparations...");
   Serial.println("Going to sleep for " + String(SLEEP_DURATION) + " seconds");
+  #endif
+
   Serial.flush();
   delay(100); // Give serial time to flush
-  #endif
-  
+
   // Disconnect from USB CDC if enabled
   #ifdef USE_USB_CDC
   #ifdef DEBUG

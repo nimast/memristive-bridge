@@ -1,14 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>E-ink Display Preview</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js"></script>
+    <title>E-paper Display Simulator</title>
     <style>
         body {
             margin: 0;
             padding: 20px;
             background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
         }
         .container {
             display: flex;
@@ -18,1032 +17,415 @@
         #canvas-container {
             border: 2px solid #666;
             flex-shrink: 0;
+            position: relative;
         }
-        .editor-container {
-            flex-grow: 1;
-            min-width: 300px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        #code-editor {
-            width: 100%;
-            height: 1000px;
-            font-family: monospace;
-            resize: none;
-            padding: 10px;
-            box-sizing: border-box;
-        }
-        .button-group {
+        .controls {
+            margin-top: 20px;
             display: flex;
             gap: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #status {
+            margin-top: 10px;
+            font-style: italic;
+            color: #555;
         }
     </style>
 </head>
 <body>
+    <h1>E-paper Display Simulator</h1>
     <div class="container">
-        <div id="canvas-container"></div>
-        <div class="editor-container">
-            <div class="button-group">
-                <button onclick="updateSketch()">Update Preview</button>
-                <button onclick="generateChaoticCircuit()">Generate Circuit</button>
-                <button onclick="generateRootBridgeCode()">Generate Root Bridge</button>
-                <button onclick="resetToBasicExample()">Reset to Basic Example</button>
-            </div>
-            <textarea id="code-editor">
-// Memristor-Based Chaotic Circuit Generator
-epdBackground(WHITE);
-
-// Canvas settings
-const CANVAS_WIDTH = 1333;
-const CANVAS_HEIGHT = 1000;
-const MARGIN = 20;
-
-// Section dimensions
-const TITLE_HEIGHT = 70;
-const TITLE_LEFT_WIDTH = CANVAS_WIDTH / 2;
-const COMPONENTS_WIDTH = 300;  // Width of the component list section
-const COMPONENTS_HEIGHT = 150;
-const FOOTER_HEIGHT = 100;  // Height of the footer section
-
-// Draw outer border rectangle 
-epdRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, false);
-
-// Draw title section rectangles - side by side
-epdRect(0, 0, TITLE_LEFT_WIDTH, TITLE_HEIGHT, false); // Left title box
-epdRect(TITLE_LEFT_WIDTH, 0, TITLE_LEFT_WIDTH, TITLE_HEIGHT, false); // Right title box
-
-// Draw component list section rectangle - only on the left side
-epdRect(0, CANVAS_HEIGHT - COMPONENTS_HEIGHT - FOOTER_HEIGHT, COMPONENTS_WIDTH, COMPONENTS_HEIGHT, false);
-
-// Draw footer section rectangle - spans the entire width
-epdRect(0, CANVAS_HEIGHT - FOOTER_HEIGHT, CANVAS_WIDTH, FOOTER_HEIGHT, false);
-
-// Circuit elements
-const COMPONENT_TYPES = {
-    MEMRISTOR: 'memristor',
-    RESISTOR: 'resistor',
-    CAPACITOR: 'capacitor',
-    INDUCTOR: 'inductor',
-    DIODE: 'diode',
-    VOLTAGE_SOURCE: 'voltage_source',
-    GROUND: 'ground',
-    NODE: 'node'
-};
-
-// Determine circuit complexity
-const numNodes = Math.floor(Math.random() * 7) + 6;       // 6-12 nodes
-const numMemristors = Math.floor(Math.random() * 4) + 3;  // 3-6 memristors
-const numResistors = Math.floor(Math.random() * 5) + 3;   // 3-7 resistors
-const numCapacitors = Math.floor(Math.random() * 4) + 2;  // 2-5 capacitors
-const numInductors = Math.floor(Math.random() * 3) + 1;   // 1-3 inductors
-const numDiodes = Math.floor(Math.random() * 4) + 1;      // 1-4 diodes
-
-// Add title and random circuit name
-const names = ["CHUA'S CIRCUIT", "MEMRISTIVE OSCILLATOR", "ROOT-BRIDGE NETWORK", 
-               "CHAOTIC CIRCUIT", "NEUROMORPHIC EMULATOR", "ORGANIC COMPUTING NODE"];
-const nameIndex = Math.floor(Math.random() * names.length);  // Choose a random name
-
-// Draw main title - left aligned in its box
-epdText("MEMRISTOR-BASED CIRCUIT", MARGIN * 2, TITLE_HEIGHT/2 + 5, true);
-
-// Draw circuit specific name - centered in its box
-const subtitleX = TITLE_LEFT_WIDTH + (TITLE_LEFT_WIDTH / 2) - 100;
-epdText(names[nameIndex], subtitleX, TITLE_HEIGHT/2 + 5, true);
-
-// Define the circuit area - using full height between title and footer
-const CIRCUIT_AREA = {
-    x: MARGIN,
-    y: TITLE_HEIGHT + MARGIN,
-    width: CANVAS_WIDTH - MARGIN*2,
-    height: CANVAS_HEIGHT - TITLE_HEIGHT - COMPONENTS_HEIGHT - MARGIN*2
-};
-
-// Calculate the actual boundaries for circuit distribution
-const CIRCUIT_BOUNDS = {
-    left: CIRCUIT_AREA.x,
-    right: CIRCUIT_AREA.x + CIRCUIT_AREA.width,
-    top: CIRCUIT_AREA.y,
-    bottom: CANVAS_HEIGHT - COMPONENTS_HEIGHT - MARGIN,
-    centerX: CIRCUIT_AREA.x + CIRCUIT_AREA.width / 2,
-    centerY: TITLE_HEIGHT + (CANVAS_HEIGHT - TITLE_HEIGHT - COMPONENTS_HEIGHT) / 2
-};
-
-// Draw a subtle grid to visualize the circuit area (comment out in final version)
-// for(let y = CIRCUIT_BOUNDS.top; y < CIRCUIT_BOUNDS.bottom; y += 50) {
-//    epdLine(CIRCUIT_BOUNDS.left, y, CIRCUIT_BOUNDS.right, y);
-// }
-
-// Calculate grid for node distribution - using full vertical space
-const availableHeight = CIRCUIT_BOUNDS.bottom - CIRCUIT_BOUNDS.top;
-const gridCols = Math.ceil(Math.sqrt(numNodes));
-const gridRows = Math.ceil(Math.sqrt(numNodes) * 1.5); // Use more rows than columns
-
-// Calculate actual spacing to maximize space usage
-const spacingX = CIRCUIT_AREA.width / (gridCols + 1);
-const spacingY = availableHeight / (gridRows + 1);
-
-// Create nodes with positions - spread throughout the entire available space
-let nodes = [];
-
-// Helper function to add jitter to positions
-function addJitter(val, jitterAmount) {
-    return val + (Math.random() * 2 - 1) * jitterAmount;
-}
-
-// First create perimeter nodes to ensure use of full space
-// Top nodes
-for(let i = 0; i < 3; i++) {
-    const x = CIRCUIT_BOUNDS.left + (i+1) * (CIRCUIT_AREA.width/4);
-    const y = CIRCUIT_BOUNDS.top + spacingY * 0.8;
-    nodes.push({x, y});
-}
-
-// Bottom nodes
-for(let i = 0; i < 3; i++) {
-    const x = CIRCUIT_BOUNDS.left + (i+1) * (CIRCUIT_AREA.width/4);
-    const y = CIRCUIT_BOUNDS.bottom - spacingY * 0.8;
-    nodes.push({x, y});
-}
-
-// Left and right side nodes
-for(let i = 0; i < 2; i++) {
-    const y = CIRCUIT_BOUNDS.top + (i+1) * (availableHeight/3);
-    // Left side
-    nodes.push({x: CIRCUIT_BOUNDS.left + spacingX * 0.8, y});
-    // Right side
-    nodes.push({x: CIRCUIT_BOUNDS.right - spacingX * 0.8, y});
-}
-
-// Now add remaining nodes in the center area
-const nodesNeeded = numNodes - nodes.length;
-if(nodesNeeded > 0) {
-    const centerRows = Math.ceil(Math.sqrt(nodesNeeded));
-    const centerCols = Math.ceil(nodesNeeded / centerRows);
-    
-    const centerWidth = CIRCUIT_AREA.width * 0.7;
-    const centerHeight = availableHeight * 0.7;
-    const centerLeft = CIRCUIT_BOUNDS.left + CIRCUIT_AREA.width * 0.15;
-    const centerTop = CIRCUIT_BOUNDS.top + availableHeight * 0.15;
-    
-    const centerSpacingX = centerWidth / (centerCols + 1);
-    const centerSpacingY = centerHeight / (centerRows + 1);
-    
-    let nodesPlaced = 0;
-    for(let row = 0; row < centerRows && nodesPlaced < nodesNeeded; row++) {
-        for(let col = 0; col < centerCols && nodesPlaced < nodesNeeded; col++) {
-            const x = centerLeft + (col + 1) * centerSpacingX;
-            const y = centerTop + (row + 1) * centerSpacingY;
-            // Add jitter to positions to avoid grid-like appearance
-            nodes.push({x: addJitter(x, centerSpacingX * 0.3), y: addJitter(y, centerSpacingY * 0.3)});
-            nodesPlaced++;
-        }
-    }
-}
-
-// Draw all nodes
-for (let i = 0; i < nodes.length; i++) {
-    epdCircle(nodes[i].x, nodes[i].y, 5, true);
-}
-
-// Draw ground symbol at node 0
-const groundNode = nodes[0];
-const groundX = groundNode.x;
-const groundY = groundNode.y + 30;
-epdLine(groundNode.x, groundNode.y, groundX, groundY);
-epdLine(groundX - 15, groundY, groundX + 15, groundY);
-epdLine(groundX - 10, groundY + 5, groundX + 10, groundY + 5);
-epdLine(groundX - 5, groundY + 10, groundX + 5, groundY + 10);
-
-// Add voltage source between node 1 and ground node
-const sourceX = (nodes[1].x + groundNode.x) / 2;
-const sourceY = (nodes[1].y + groundNode.y) / 2;
-const radius = 25;
-
-epdCircle(sourceX, sourceY, radius, false);
-epdText("+", sourceX - 5, sourceY - 8);
-epdLine(sourceX - 7, sourceY + 8, sourceX + 7, sourceY + 8);
-epdLine(nodes[1].x, nodes[1].y, sourceX - radius, sourceY);
-epdLine(groundNode.x, groundNode.y, sourceX + radius, sourceY);
-
-// Helper function to find a random node pair
-function getRandomNodePair() {
-    const node1 = Math.floor(Math.random() * nodes.length);
-    let node2;
-    do {
-        node2 = Math.floor(Math.random() * nodes.length);
-    } while (node1 === node2);
-    
-    return {node1, node2};
-}
-
-// Draw memristors
-for (let i = 0; i < numMemristors; i++) {
-    const {node1, node2} = getRandomNodePair();
-    const compX = (nodes[node1].x + nodes[node2].x) / 2;
-    const compY = (nodes[node1].y + nodes[node2].y) / 2;
-    
-    // Draw memristor (rectangular with M)
-    const width = 60;
-    const height = 30;
-    
-    epdRect(compX - width/2, compY - height/2, width, height, false);
-    epdText("M", compX - 5, compY - 8);
-    
-    // Draw connecting lines
-    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
-    epdLine(nodes[node2].x, nodes[node2].y, compX + width/2, compY);
-}
-
-// Draw resistors
-for (let i = 0; i < numResistors; i++) {
-    const {node1, node2} = getRandomNodePair();
-    const compX = (nodes[node1].x + nodes[node2].x) / 2;
-    const compY = (nodes[node1].y + nodes[node2].y) / 2;
-    const width = 50;
-    const height = 20;
-    
-    // Draw zigzag resistor
-    const startX = compX - width/2;
-    const endX = compX + width/2;
-    
-    epdLine(nodes[node1].x, nodes[node1].y, startX, compY);
-    epdLine(startX, compY, startX + 5, compY - height/2);
-    epdLine(startX + 5, compY - height/2, startX + 15, compY + height/2);
-    epdLine(startX + 15, compY + height/2, startX + 25, compY - height/2);
-    epdLine(startX + 25, compY - height/2, startX + 35, compY + height/2);
-    epdLine(startX + 35, compY + height/2, startX + 45, compY - height/2);
-    epdLine(startX + 45, compY - height/2, endX, compY);
-    epdLine(endX, compY, nodes[node2].x, nodes[node2].y);
-}
-
-// Draw capacitors
-for (let i = 0; i < numCapacitors; i++) {
-    const {node1, node2} = getRandomNodePair();
-    const compX = (nodes[node1].x + nodes[node2].x) / 2;
-    const compY = (nodes[node1].y + nodes[node2].y) / 2;
-    const width = 40;
-    const plateSpacing = 10;
-    
-    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
-    epdLine(compX - width/2, compY - 15, compX - width/2, compY + 15);
-    epdLine(compX - width/2 + plateSpacing, compY - 15, compX - width/2 + plateSpacing, compY + 15);
-    epdLine(compX - width/2 + plateSpacing, compY, nodes[node2].x, nodes[node2].y);
-}
-
-// Draw inductors
-for (let i = 0; i < numInductors; i++) {
-    const {node1, node2} = getRandomNodePair();
-    const compX = (nodes[node1].x + nodes[node2].x) / 2;
-    const compY = (nodes[node1].y + nodes[node2].y) / 2;
-    const width = 60;
-    const loopRadius = 6;
-    
-    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
-    
-    // Draw loops
-    for (let j = 0; j < 4; j++) {
-        const loopX = compX - width/2 + 10 + j * 15;
-        epdCircle(loopX, compY, loopRadius, false);
-    }
-    
-    epdLine(compX + width/2 - 5, compY, nodes[node2].x, nodes[node2].y);
-}
-
-// Draw diodes
-for (let i = 0; i < numDiodes; i++) {
-    const {node1, node2} = getRandomNodePair();
-    const compX = (nodes[node1].x + nodes[node2].x) / 2;
-    const compY = (nodes[node1].y + nodes[node2].y) / 2;
-    const width = 30;
-    const height = 20;
-    
-    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
-    
-    // Triangle
-    epdLine(compX - width/2, compY - height/2, compX - width/2, compY + height/2);
-    epdLine(compX - width/2, compY - height/2, compX + width/2, compY);
-    epdLine(compX - width/2, compY + height/2, compX + width/2, compY);
-    
-    // Line
-    epdLine(compX + width/2, compY - height/2, compX + width/2, compY + height/2);
-    
-    epdLine(compX + width/2, compY, nodes[node2].x, nodes[node2].y);
-}
-
-// Add component counts in the component list section - removing the "COMPONENTS:" title
-const componentStartX = 30;
-const componentStartY = CANVAS_HEIGHT - COMPONENTS_HEIGHT - FOOTER_HEIGHT + 30;
-epdText("MEMRISTORS: " + numMemristors, componentStartX, componentStartY);
-epdText("RESISTORS: " + numResistors, componentStartX, componentStartY + 20);
-epdText("CAPACITORS: " + numCapacitors, componentStartX, componentStartY + 40);
-epdText("INDUCTORS: " + numInductors, componentStartX, componentStartY + 60);
-epdText("DIODES: " + numDiodes, componentStartX, componentStartY + 80);
-
-// Add sample measurements in footer
-const footerY = CANVAS_HEIGHT - FOOTER_HEIGHT + 40;
-epdText("TIME: " + Math.floor(Date.now()/1000) + " s", 30, footerY);
-epdText("SAMPLE: " + (Math.floor(Math.random() * 900) + 100), 30, footerY + 30);
-            </textarea>
+        <div id="canvas-container">
+            <!-- Canvas will be created here by JavaScript -->
         </div>
     </div>
+    <div class="controls">
+        <button id="drawBridgeBtn">Draw Root Bridge</button>
+        <button id="drawCircuitBtn">Draw Circuit</button>
+        <button id="toggleMirrorBtn">Toggle Vertical Mirroring</button>
+    </div>
+    <div id="status">Ready</div>
+
     <script>
+        // Constants to match Arduino code
         const WHITE = 0;
         const BLACK = 1;
-        let currentSketch = '';
-
-        // Constants for root bridge
-        const NUM_ROOTS = 10;
-        const MAX_POINTS_PER_ROOT = 20;
-        const ATTRACTION_RADIUS = 30;
-
-        class Root {
-            constructor(startX, startY, dirX, dirY) {
-                this.points = [{x: startX, y: startY}];
-                this.growing = true;
-                this.direction = {x: dirX, y: dirY};
-                this.thickness = random(1, 3);
+        const MIRROR_NONE = 0x00;
+        const MIRROR_HORIZONTAL = 0x01;
+        const MIRROR_VERTICAL = 0x02;
+        const MIRROR_ORIGIN = 0x03;
+        
+        // Screen dimensions to match the 7.5" e-Paper display
+        const EPD_7IN5_V2_WIDTH = 800;
+        const EPD_7IN5_V2_HEIGHT = 480;
+        
+        // Font definitions to match Arduino
+        const Font12 = { Width: 7, Height: 12 };
+        const Font16 = { Width: 11, Height: 16 };
+        const Font20 = { Width: 14, Height: 20 };
+        
+        // Create canvas
+        const canvasContainer = document.getElementById('canvas-container');
+        const canvas = document.createElement('canvas');
+        canvas.width = EPD_7IN5_V2_WIDTH;
+        canvas.height = EPD_7IN5_V2_HEIGHT;
+        canvasContainer.appendChild(canvas);
+        const ctx = canvas.getContext('2d');
+        
+        // Arduino-like random function
+        function random(min, max) {
+            if (typeof max === 'undefined') {
+                max = min;
+                min = 0;
             }
+            return Math.floor(Math.random() * (max - min)) + min;
         }
-
-        let roots = [];
-        let leftBankHeight, rightBankHeight;
-
-        // Display class simulation
-        class DisplaySimulator {
-            static point(x, y) {
-                stroke(0);
-                strokeWeight(1);
-                point(x, y);
+        
+        // Math functions
+        function sqrt(x) { return Math.sqrt(x); }
+        function cos(x) { return Math.cos(x); }
+        function sin(x) { return Math.sin(x); }
+        function min(a, b) { return Math.min(a, b); }
+        function max(a, b) { return Math.max(a, b); }
+        function ceil(x) { return Math.ceil(x); }
+        
+        // Display class simulation - mimics the Display.h file functions
+        class Display {
+            static buffer = null;
+            static mirrorVertical = false;
+            
+            // Initialize the display
+            static begin() {
+                // Clear and set to white
+                ctx.fillStyle = "white";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Set default drawing styles
+                ctx.strokeStyle = "black";
+                ctx.fillStyle = "black";
+                ctx.lineWidth = 1;
+                
+                // Initialize mirror state
+                Display.mirrorVertical = false;
             }
             
-            static line(x1, y1, x2, y2) {
-                stroke(0);
-                strokeWeight(1);
-                line(x1, y1, x2, y2);
-            }
-            
-            static rect(x, y, w, h, filled = false) {
-                stroke(0);
-                strokeWeight(1);
-                if (filled) {
-                    fill(0);
-                } else {
-                    noFill();
-                }
-                rect(x, y, w, h);
-            }
-            
-            static circle(x, y, radius, filled = false) {
-                stroke(0);
-                strokeWeight(1);
-                if (filled) {
-                    fill(0);
-                } else {
-                    noFill();
-                }
-                circle(x, y, radius);
-            }
-            
-            static text(str, x, y, large = false) {
-                noStroke();
-                fill(0);
-                textSize(large ? 16 : 12);
-                text(str, x, y);
-            }
-            
+            // Set the background color
             static background(color) {
-                background(color === WHITE ? 255 : 0);
-            }
-        }
-
-        function setup() {
-            const canvas = createCanvas(1333, 1000);
-            canvas.parent('canvas-container');
-            background(255);
-            
-            // Initialize random seed
-            if (Math.seedrandom) {
-                Math.seedrandom(Date.now().toString());
+                ctx.fillStyle = color === WHITE ? "white" : "black";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
             }
             
-            // Make Display methods globally available with 'epd' prefix
-            window.epdPoint = DisplaySimulator.point;
-            window.epdLine = DisplaySimulator.line;
-            window.epdRect = DisplaySimulator.rect;
-            window.epdCircle = DisplaySimulator.circle;
-            window.epdText = DisplaySimulator.text;
-            window.epdBackground = DisplaySimulator.background;
+            // Draw a point
+            static point(x, y) {
+                if (Display.mirrorVertical) y = canvas.height - y;
+                ctx.fillStyle = "black";
+                ctx.fillRect(x, y, 1, 1);
+            }
             
-            updateSketch();
-        }
-
-        function initializeRootBridge() {
-            roots = [];
-            leftBankHeight = 400;
-            rightBankHeight = 400;
-
-            for(let i = 0; i < NUM_ROOTS; i++) {
-                if(i % 2 === 0) {
-                    roots.push(new Root(150, leftBankHeight, 0.8, -0.2));
+            // Draw a line
+            static line(x1, y1, x2, y2) {
+                if (Display.mirrorVertical) {
+                    y1 = canvas.height - y1;
+                    y2 = canvas.height - y2;
+                }
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+            
+            // Draw a rectangle
+            static rect(x1, y1, x2, y2, filled = false) {
+                if (Display.mirrorVertical) {
+                    y1 = canvas.height - y1;
+                    y2 = canvas.height - y2;
+                    // Swap y values when mirrored to maintain correct rectangle
+                    [y1, y2] = [y2, y1];
+                }
+                
+                const width = x2 - x1;
+                const height = y2 - y1;
+                
+                if (filled) {
+                    ctx.fillRect(x1, y1, width, height);
                 } else {
-                    roots.push(new Root(650, rightBankHeight, -0.8, -0.2));
+                    ctx.strokeRect(x1, y1, width, height);
+                }
+            }
+            
+            // Draw a circle
+            static circle(x, y, radius, filled = false) {
+                if (Display.mirrorVertical) y = canvas.height - y;
+                
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                if (filled) {
+                    ctx.fill();
+                } else {
+                    ctx.stroke();
+                }
+            }
+            
+            // Draw text
+            static text(str, x, y, large = false) {
+                if (Display.mirrorVertical) y = canvas.height - y;
+                
+                ctx.font = large ? "16px monospace" : "12px monospace";
+                ctx.fillText(str, x, y);
+            }
+            
+            // Update display - in this simulator just ensures everything is drawn
+            static show() {
+                // All drawing is immediate in canvas, so nothing to do here
+            }
+            
+            // Set vertical mirroring
+            static setMirrorVertical(mirror) {
+                Display.mirrorVertical = mirror;
+            }
+            
+            // Draw a root line with thickness
+            static drawRootLine(x1, y1, x2, y2, thickness = 1) {
+                for (let i = 0; i < thickness; i++) {
+                    Display.line(x1, y1 + i, x2, y2 + i);
                 }
             }
         }
-
-        function drawRootBridge() {
-            clear();
-            epdBackground(WHITE);
+        
+        // Simulate Paint functions from Arduino
+        // These will call the canvas equivalent operations
+        function Paint_DrawPoint(x, y, color, dot_pixel, dot_style) {
+            ctx.fillStyle = color === WHITE ? "white" : "black";
+            const size = dot_pixel;
+            ctx.fillRect(x - size/2, y - size/2, size, size);
+        }
+        
+        function Paint_DrawLine(x1, y1, x2, y2, color, dot_pixel, line_style) {
+            if (Display.mirrorVertical) {
+                y1 = canvas.height - y1;
+                y2 = canvas.height - y2;
+            }
+            ctx.strokeStyle = color === WHITE ? "white" : "black";
+            ctx.lineWidth = dot_pixel;
             
-            // Draw banks
-            epdRect(0, leftBankHeight, 150, 1000-leftBankHeight, true);
-            epdRect(650, rightBankHeight, 1333-650, 1000-rightBankHeight, true);
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+        
+        function Paint_DrawRectangle(x1, y1, x2, y2, color, dot_pixel, draw_fill) {
+            if (Display.mirrorVertical) {
+                y1 = canvas.height - y1;
+                y2 = canvas.height - y2;
+                // Swap y values when mirrored to maintain correct rectangle
+                [y1, y2] = [y2, y1];
+            }
             
-            initializeRootBridge();
-
-            // Grow roots for several iterations
-            for(let step = 0; step < 50; step++) {
-                for(let root of roots) {
-                    if(!root.growing) continue;
-                    
-                    let lastPoint = root.points[root.points.length - 1];
-                    
-                    // Add some randomness to direction
-                    let noise = random(-0.2, 0.2);
-                    root.direction.x += noise;
-                    root.direction.y += noise;
-                    
-                    // Normalize direction
-                    let len = sqrt(root.direction.x * root.direction.x + 
-                                 root.direction.y * root.direction.y);
-                    root.direction.x /= len;
-                    root.direction.y /= len;
-                    
-                    // Add new point
-                    let newPoint = {
-                        x: lastPoint.x + root.direction.x * 15,
-                        y: lastPoint.y + root.direction.y * 15
-                    };
-                    
-                    // Check for connections with other roots
-                    for(let otherRoot of roots) {
-                        if(otherRoot === root) continue;
-                        
-                        for(let point of otherRoot.points) {
-                            let dx = newPoint.x - point.x;
-                            let dy = newPoint.y - point.y;
-                            let dist = sqrt(dx*dx + dy*dy);
-                            
-                            if(dist < ATTRACTION_RADIUS) {
-                                // Draw connection
-                                epdLine(newPoint.x, newPoint.y, point.x, point.y);
-                                root.growing = false;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // Add point and draw
-                    root.points.push(newPoint);
-                    epdLine(lastPoint.x, lastPoint.y, newPoint.x, newPoint.y);
-                    
-                    // Stop if reached other side or too many points
-                    if((root.direction.x > 0 && newPoint.x > 650) || 
-                       (root.direction.x < 0 && newPoint.x < 150) ||
-                       root.points.length > MAX_POINTS_PER_ROOT) {
-                        root.growing = false;
-                    }
-                }
+            ctx.strokeStyle = color === WHITE ? "white" : "black";
+            ctx.fillStyle = color === WHITE ? "white" : "black";
+            ctx.lineWidth = dot_pixel;
+            
+            const width = x2 - x1;
+            const height = y2 - y1;
+            
+            if (draw_fill === 1) { // DRAW_FILL_FULL
+                ctx.fillRect(x1, y1, width, height);
+            } else {
+                ctx.strokeRect(x1, y1, width, height);
             }
         }
-
-        function resetToBasicExample() {
-            document.getElementById('code-editor').value = `// Your drawing code here
-epdBackground(WHITE);
-
-// Draw a house
-epdRect(100, 100, 200, 150, false);    // house frame
-epdRect(150, 160, 50, 90, false);      // door
-epdRect(270, 130, 40, 40, false);      // window
-
-// Roof (triangle using lines)
-epdLine(100, 100, 200, 50);
-epdLine(200, 50, 300, 100);
-
-// Add some text
-epdText("My House", 150, 220, true);`;
-            updateSketch();
-        }
-
-        function draw() {
-            // P5.js requires a draw function
-        }
-
-        function updateSketch() {
-            const code = document.getElementById('code-editor').value;
-            if (code === currentSketch) return;
-            currentSketch = code;
+        
+        function Paint_DrawCircle(x, y, radius, color, dot_pixel, draw_fill) {
+            if (Display.mirrorVertical) y = canvas.height - y;
             
-            try {
-                clear();
-                background(255);
-                eval(code);
-            } catch (error) {
-                console.error('Error in sketch:', error);
+            ctx.strokeStyle = color === WHITE ? "white" : "black";
+            ctx.fillStyle = color === WHITE ? "white" : "black";
+            ctx.lineWidth = dot_pixel;
+            
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            
+            if (draw_fill === 1) { // DRAW_FILL_FULL
+                ctx.fill();
+            } else {
+                ctx.stroke();
             }
         }
+        
+        function Paint_DrawString_EN(x, y, text, font, background_color, foreground_color) {
+            if (Display.mirrorVertical) y = canvas.height - y;
+            
+            ctx.fillStyle = foreground_color === WHITE ? "white" : "black";
+            
+            // Set font size based on the font parameter
+            let fontSize = 12;
+            if (font === Font16 || font.Height === 16) fontSize = 16;
+            if (font === Font20 || font.Height === 20) fontSize = 20;
+            
+            ctx.font = `${fontSize}px monospace`;
+            ctx.fillText(text, x, y);
+        }
+        
+        function Paint_Clear(color) {
+            ctx.fillStyle = color === WHITE ? "white" : "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        
+        function Paint_SetMirroring(mirror) {
+            // Only handling vertical mirroring for now
+            Display.mirrorVertical = (mirror & MIRROR_VERTICAL) !== 0;
+        }
+        
+        function Paint_NewImage(buffer, width, height, rotate, color) {
+            // Just clear the canvas in the simulator
+            ctx.fillStyle = color === WHITE ? "white" : "black";
+            ctx.fillRect(0, 0, width, height);
+        }
+        
+        function Paint_SelectImage(buffer) {
+            // Nothing to do in simulator
+        }
+        
+        // Mock functions needed by the Arduino code
+        function EPD_7IN5_V2_Display(buffer) {
+            // Nothing to do in simulator - display is immediate
+        }
+        
+        function EPD_7IN5_V2_Init() {
+            // Initialize display
+            Display.begin();
+        }
+        
+        function EPD_7IN5_V2_Clear() {
+            // Clear display
+            Display.background(WHITE);
+        }
+        
+        const DRAW_FILL_EMPTY = 0;
+        const DRAW_FILL_FULL = 1;
+        const DOT_PIXEL_1X1 = 1;
+        const DOT_STYLE_DFT = 1;
+        const LINE_STYLE_SOLID = 1;
+        
+        // Status update function
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
 
-        // Auto-update preview when code changes
-        let timeout;
-        document.getElementById('code-editor').addEventListener('input', () => {
-            clearTimeout(timeout);
-            timeout = setTimeout(updateSketch, 500);
+        // Initialize the display when the page loads
+        window.onload = function() {
+            Display.begin();
+            updateStatus("Display initialized");
+        };
+        
+        // Add button event listeners
+        document.getElementById('drawBridgeBtn').addEventListener('click', function() {
+            updateStatus("Drawing Root Bridge...");
+            // Clear the canvas first
+            Paint_Clear(WHITE);
+            
+            // Draw the root bridge
+            const centerX = EPD_7IN5_V2_WIDTH / 2;
+            const centerY = EPD_7IN5_V2_HEIGHT / 2;
+            
+            // Draw main trunk
+            Paint_DrawLine(centerX, centerY + 100, centerX, centerY - 100, BLACK, 5, LINE_STYLE_SOLID);
+            
+            // Draw branches
+            for (let i = 0; i < 6; i++) {
+                const angle = (i * Math.PI / 3);
+                const length = 80;
+                const startY = centerY - 50 + (i * 20);
+                
+                const endX = centerX + Math.cos(angle) * length;
+                const endY = startY + Math.sin(angle) * length;
+                
+                Paint_DrawLine(centerX, startY, endX, endY, BLACK, 3, LINE_STYLE_SOLID);
+            }
+            
+            // Draw some roots at the bottom
+            for (let i = 0; i < 8; i++) {
+                const startX = centerX - 80 + (i * 20);
+                const startY = centerY + 100;
+                const endY = startY + random(20, 50);
+                
+                Paint_DrawLine(startX, startY, startX + random(-10, 10), endY, BLACK, 2, LINE_STYLE_SOLID);
+            }
+            
+            // Draw title
+            Paint_DrawString_EN(centerX - 80, 40, "Root Bridge Simulation", Font16, WHITE, BLACK);
         });
-
-        function generateRootBridgeCode() {
-            // Force a new random seed
-            if (Math.seedrandom) {
-                Math.seedrandom(Date.now());
-            }
+        
+        document.getElementById('drawCircuitBtn').addEventListener('click', function() {
+            updateStatus("Drawing Circuit...");
+            // Clear the canvas first
+            Paint_Clear(WHITE);
             
-            // Clear previous content
-            clear();
-            background(255);
+            // Draw a simple circuit
+            const startX = 100;
+            const startY = 100;
+            const width = 600;
+            const height = 280;
+            const centerX = EPD_7IN5_V2_WIDTH / 2;
             
-            // Create and execute simple code to display a root bridge
-            let code = `// Indigenous Root Bridge Display
-epdBackground(WHITE);
-
-// Constants
-const START_LEFT = 150;
-const START_RIGHT = 650;
-const START_Y = 400;
-
-// Draw banks
-epdRect(0, START_Y, START_LEFT, START_Y + 600, true);  // Left bank
-epdRect(START_RIGHT, START_Y, 1333, START_Y + 600, true);  // Right bank
-
-// Draw trees
-function drawTree(x, y, len, angle, depth) {
-    if (depth <= 0) return;
-    
-    let endX = x + len * Math.cos(angle);
-    let endY = y + len * Math.sin(angle);
-    epdLine(x, y, endX, endY);
-    
-    if (depth > 1) {
-        let newLen = len * 0.7;
-        drawTree(endX, endY, newLen, angle - 0.5, depth - 1);
-        drawTree(endX, endY, newLen, angle + 0.5, depth - 1);
-    }
-}
-
-// Create trees on each bank
-const leftTrees = [];
-const rightTrees = [];
-
-// Draw several trees on each bank
-for(let i = 0; i < 5; i++) {
-    // Left trees
-    let leftX = 20 + i * 40;
-    let leftY = START_Y;
-    leftTrees.push({x: leftX, y: leftY});
-    drawTree(leftX, leftY, 80, -Math.PI/2, 5);
-    
-    // Right trees
-    let rightX = 670 + i * 40;
-    let rightY = START_Y;
-    rightTrees.push({x: rightX, y: rightY});
-    drawTree(rightX, rightY, 80, -Math.PI/2, 5);
-}
-
-// Draw bridge roots connecting trees
-const NUM_ROOTS = 8;
-
-for(let i = 0; i < NUM_ROOTS; i++) {
-    // Determine start and end points
-    let startX, startY, endX, endY;
-    let prevX, prevY;
-    let treeIdx = i % 5;
-    let sourceTreeIdx = i % 5;  // Choose source tree based on root index
-    
-    if(i % 2 === 0) {
-        // Left to right - start from bottom of left tree
-        startX = leftTrees[sourceTreeIdx].x;
-        startY = leftTrees[sourceTreeIdx].y;  // Exactly at the base/bottom of the tree
-        endX = rightTrees[treeIdx].x;
-        endY = rightTrees[treeIdx].y - 30 - (i % 3) * 15;  // Target higher up tree
-        prevX = startX;
-        prevY = startY;
-    } else {
-        // Right to left - start from bottom of right tree
-        startX = rightTrees[sourceTreeIdx].x;
-        startY = rightTrees[sourceTreeIdx].y;  // Exactly at the base/bottom of the tree
-        endX = leftTrees[treeIdx].x;
-        endY = leftTrees[treeIdx].y - 30 - (i % 3) * 15;  // Target higher up tree
-        prevX = startX;
-        prevY = startY;
-    }
-    
-    // Generate points between start and end with some natural curve
-    const numSegments = 20;
-    const thickness = 2 + (i % 3);
-    
-    // Draw initial point
-    for(let t = 0; t < thickness; t++) {
-        epdLine(startX, startY + t, startX, startY + t);
-    }
-    
-    // Generate path with slight curve and more pronounced downward dangle
-    for(let j = 1; j <= numSegments; j++) {
-        const progress = j / numSegments;
-        const invProgress = 1 - progress;
-        
-        // Calculate next point with a much more pronounced downward arc
-        // Create a deeper dip in the middle by increasing the midpoint Y value
-        const midY = Math.max(startY, endY) + 80 + (i % 3) * 20; // Significantly increased arc height for deeper dangle
-        
-        // Apply stronger downward curve at the middle of the bridge
-        let arcModifier = 1;
-        if (progress > 0.3 && progress < 0.7) {
-            // Increase the dip even more in the middle section
-            arcModifier = 1.5;
-        }
-        
-        const arcY = startY * invProgress * invProgress + 
-                    midY * 2 * progress * invProgress * arcModifier + 
-                    endY * progress * progress;
-        
-        // Linear interpolation for x
-        const nextX = startX * invProgress + endX * progress;
-        const nextY = arcY;
-        
-        // Draw segment with thickness
-        for(let t = 0; t < thickness; t++) {
-            epdLine(prevX, prevY + t, nextX, nextY + t);
-        }
-        
-        // Add more hanging roots with increased length, especially in the middle
-        const hangingProbability = (progress > 0.3 && progress < 0.7) ? 0.6 : 0.4; // Higher probability in middle
-        if(j % 3 === 0 && j > 3 && j < numSegments - 3 || (Math.random() < hangingProbability && j % 2 === 0)) {
-            const hangLen = 15 + Math.random() * 25;
-            // Make middle hangers even longer
-            const extraLength = (progress > 0.3 && progress < 0.7) ? 15 : 0;
-            for(let t = 0; t < thickness - 1; t++) {
-                epdLine(nextX, nextY + t, nextX + (Math.random() * 10 - 5), nextY + hangLen + extraLength + t);
-            }
-        }
-        
-        prevX = nextX;
-        prevY = nextY;
-    }
-    
-    // Connect final point to tree
-    for(let t = 0; t < thickness; t++) {
-        epdLine(prevX, prevY + t, endX, endY + t);
-    }
-}
-
-// Add climbing tendrils on trees
-for(let side = 0; side < 2; side++) {
-    const trees = side === 0 ? leftTrees : rightTrees;
-    
-    for(let i = 0; i < trees.length; i++) {
-        const treeX = trees[i].x;
-        const treeY = trees[i].y;
-        
-        // Draw 2-3 tendrils per tree
-        for(let j = 0; j < 2 + Math.floor(Math.random() * 2); j++) {
-            const startY = treeY - 10 - Math.random() * 30;
-            const endY = startY - 15 - Math.random() * 15;
+            // Draw outer rectangle
+            Paint_DrawRectangle(startX, startY, startX + width, startY + height, BLACK, 1, DRAW_FILL_EMPTY);
             
-            // Create wavy pattern for climbing tendril
-            const dir = side === 0 ? 1 : -1;
-            const midX1 = treeX + dir * (5 + Math.random() * 5);
-            const midX2 = treeX - dir * (5 + Math.random() * 5);
+            // Draw components
             
-            epdLine(treeX, startY, midX1, startY - 7);
-            epdLine(midX1, startY - 7, midX2, startY - 14);
-            epdLine(midX2, startY - 14, treeX, endY);
-        }
-    }
-}`;
-
-            // Update the code editor
-            document.getElementById('code-editor').value = code;
-            // Trigger the preview update
-            updateSketch();
-        }
-
-        // Modify the button click handlers
-        document.querySelector('button:nth-child(2)').onclick = generateChaoticCircuit;
-        document.querySelector('button:nth-child(3)').onclick = generateRootBridgeCode;
+            // Battery
+            const batteryX = startX + 50;
+            const batteryY = startY + height/2;
+            Paint_DrawLine(batteryX - 20, batteryY, batteryX + 20, batteryY, BLACK, 2, LINE_STYLE_SOLID);
+            Paint_DrawLine(batteryX - 10, batteryY - 15, batteryX - 10, batteryY + 15, BLACK, 2, LINE_STYLE_SOLID);
+            Paint_DrawLine(batteryX + 10, batteryY - 30, batteryX + 10, batteryY + 30, BLACK, 2, LINE_STYLE_SOLID);
+            
+            // Resistor
+            const resistorX = startX + 200;
+            const resistorY = startY + height/2;
+            Paint_DrawRectangle(resistorX - 30, resistorY - 10, resistorX + 30, resistorY + 10, BLACK, 1, DRAW_FILL_EMPTY);
+            
+            // Capacitor
+            const capacitorX = startX + 350;
+            const capacitorY = startY + height/2;
+            Paint_DrawLine(capacitorX - 5, capacitorY - 20, capacitorX - 5, capacitorY + 20, BLACK, 2, LINE_STYLE_SOLID);
+            Paint_DrawLine(capacitorX + 5, capacitorY - 20, capacitorX + 5, capacitorY + 20, BLACK, 2, LINE_STYLE_SOLID);
+            
+            // LED
+            const ledX = startX + 500;
+            const ledY = startY + height/2;
+            Paint_DrawCircle(ledX, ledY, 20, BLACK, 1, DRAW_FILL_EMPTY);
+            Paint_DrawLine(ledX - 10, ledY - 10, ledX + 10, ledY + 10, BLACK, 1, LINE_STYLE_SOLID);
+            Paint_DrawLine(ledX - 10, ledY + 10, ledX + 10, ledY - 10, BLACK, 1, LINE_STYLE_SOLID);
+            
+            // Connect components with wires
+            Paint_DrawLine(batteryX + 20, batteryY, resistorX - 30, resistorY, BLACK, 1, LINE_STYLE_SOLID);
+            Paint_DrawLine(resistorX + 30, resistorY, capacitorX - 15, capacitorY, BLACK, 1, LINE_STYLE_SOLID);
+            Paint_DrawLine(capacitorX + 15, capacitorY, ledX - 20, ledY, BLACK, 1, LINE_STYLE_SOLID);
+            Paint_DrawLine(ledX + 20, ledY, startX + width - 50, ledY, BLACK, 1, LINE_STYLE_SOLID);
+            Paint_DrawLine(startX + width - 50, ledY, startX + width - 50, startY + height - 50, BLACK, 1, LINE_STYLE_SOLID);
+            Paint_DrawLine(startX + width - 50, startY + height - 50, batteryX - 20, startY + height - 50, BLACK, 1, LINE_STYLE_SOLID);
+            Paint_DrawLine(batteryX - 20, startY + height - 50, batteryX - 20, batteryY, BLACK, 1, LINE_STYLE_SOLID);
+            
+            // Draw title
+            Paint_DrawString_EN(centerX - 60, 40, "Circuit Diagram", Font16, WHITE, BLACK);
+        });
         
-        function generateChaoticCircuit() {
-            // Force a new random seed for each generation
-            if (Math.seedrandom) {
-                Math.seedrandom(Date.now() + Math.random().toString());
-            }
-            
-            // Clear any previous content
-            clear();
-            background(255);
-            
-            let code = `// Memristor-Based Chaotic Circuit Generator
-epdBackground(WHITE);
-
-// Canvas settings
-const CANVAS_WIDTH = 1333;
-const CANVAS_HEIGHT = 1000;
-const MARGIN = 20;
-
-// Section dimensions
-const TITLE_HEIGHT = 70;
-const TITLE_LEFT_WIDTH = CANVAS_WIDTH / 2;
-const COMPONENTS_WIDTH = 300;  // Width of the component list section
-const COMPONENTS_HEIGHT = 150;
-const FOOTER_HEIGHT = 100;  // Height of the footer section
-
-// Draw outer border rectangle 
-epdRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, false);
-
-// Draw title section rectangles - side by side
-epdRect(0, 0, TITLE_LEFT_WIDTH, TITLE_HEIGHT, false); // Left title box
-epdRect(TITLE_LEFT_WIDTH, 0, TITLE_LEFT_WIDTH, TITLE_HEIGHT, false); // Right title box
-
-// Draw component list section rectangle - only on the left side
-epdRect(0, CANVAS_HEIGHT - COMPONENTS_HEIGHT - FOOTER_HEIGHT, COMPONENTS_WIDTH, COMPONENTS_HEIGHT, false);
-
-// Draw footer section rectangle - spans the entire width
-epdRect(0, CANVAS_HEIGHT - FOOTER_HEIGHT, CANVAS_WIDTH, FOOTER_HEIGHT, false);
-
-// Circuit elements
-const COMPONENT_TYPES = {
-    MEMRISTOR: 'memristor',
-    RESISTOR: 'resistor',
-    CAPACITOR: 'capacitor',
-    INDUCTOR: 'inductor',
-    DIODE: 'diode',
-    VOLTAGE_SOURCE: 'voltage_source',
-    GROUND: 'ground',
-    NODE: 'node'
-};
-
-// Determine circuit complexity
-const numNodes = Math.floor(Math.random() * 7) + 6;       // 6-12 nodes
-const numMemristors = Math.floor(Math.random() * 4) + 3;  // 3-6 memristors
-const numResistors = Math.floor(Math.random() * 5) + 3;   // 3-7 resistors
-const numCapacitors = Math.floor(Math.random() * 4) + 2;  // 2-5 capacitors
-const numInductors = Math.floor(Math.random() * 3) + 1;   // 1-3 inductors
-const numDiodes = Math.floor(Math.random() * 4) + 1;      // 1-4 diodes
-
-// Add title and random circuit name
-const names = ["CHUA'S CIRCUIT", "MEMRISTIVE OSCILLATOR", "ROOT-BRIDGE NETWORK", 
-               "CHAOTIC CIRCUIT", "NEUROMORPHIC EMULATOR", "ORGANIC COMPUTING NODE"];
-const nameIndex = Math.floor(Math.random() * names.length);  // Choose a random name
-
-// Draw main title - left aligned in its box
-epdText("MEMRISTOR-BASED CIRCUIT", MARGIN * 2, TITLE_HEIGHT/2 + 5, true);
-
-// Draw circuit specific name - centered in its box
-const subtitleX = TITLE_LEFT_WIDTH + (TITLE_LEFT_WIDTH / 2) - 100;
-epdText(names[nameIndex], subtitleX, TITLE_HEIGHT/2 + 5, true);
-
-// Define the circuit area - using full height between title and footer
-const CIRCUIT_AREA = {
-    x: MARGIN,
-    y: TITLE_HEIGHT + MARGIN,
-    width: CANVAS_WIDTH - MARGIN*2,
-    height: CANVAS_HEIGHT - TITLE_HEIGHT - COMPONENTS_HEIGHT - MARGIN*2
-};
-
-// Calculate the actual boundaries for circuit distribution
-const CIRCUIT_BOUNDS = {
-    left: CIRCUIT_AREA.x,
-    right: CIRCUIT_AREA.x + CIRCUIT_AREA.width,
-    top: CIRCUIT_AREA.y,
-    bottom: CANVAS_HEIGHT - COMPONENTS_HEIGHT - MARGIN,
-    centerX: CIRCUIT_AREA.x + CIRCUIT_AREA.width / 2,
-    centerY: TITLE_HEIGHT + (CANVAS_HEIGHT - TITLE_HEIGHT - COMPONENTS_HEIGHT) / 2
-};
-
-// Calculate grid for node distribution - using full vertical space
-const availableHeight = CIRCUIT_BOUNDS.bottom - CIRCUIT_BOUNDS.top;
-const gridCols = Math.ceil(Math.sqrt(numNodes));
-const gridRows = Math.ceil(Math.sqrt(numNodes) * 1.5); // Use more rows than columns
-
-// Calculate actual spacing to maximize space usage
-const spacingX = CIRCUIT_AREA.width / (gridCols + 1);
-const spacingY = availableHeight / (gridRows + 1);
-
-// Create nodes with positions - spread throughout the entire available space
-let nodes = [];
-
-// Helper function to add jitter to positions
-function addJitter(val, jitterAmount) {
-    return val + (Math.random() * 2 - 1) * jitterAmount;
-}
-
-// First create perimeter nodes to ensure use of full space
-// Top nodes
-for(let i = 0; i < 3; i++) {
-    const x = CIRCUIT_BOUNDS.left + (i+1) * (CIRCUIT_AREA.width/4);
-    const y = CIRCUIT_BOUNDS.top + spacingY * 0.8;
-    nodes.push({x, y});
-}
-
-// Bottom nodes
-for(let i = 0; i < 3; i++) {
-    const x = CIRCUIT_BOUNDS.left + (i+1) * (CIRCUIT_AREA.width/4);
-    const y = CIRCUIT_BOUNDS.bottom - spacingY * 0.8;
-    nodes.push({x, y});
-}
-
-// Left and right side nodes
-for(let i = 0; i < 2; i++) {
-    const y = CIRCUIT_BOUNDS.top + (i+1) * (availableHeight/3);
-    // Left side
-    nodes.push({x: CIRCUIT_BOUNDS.left + spacingX * 0.8, y});
-    // Right side
-    nodes.push({x: CIRCUIT_BOUNDS.right - spacingX * 0.8, y});
-}
-
-// Now add remaining nodes in the center area
-const nodesNeeded = numNodes - nodes.length;
-if(nodesNeeded > 0) {
-    const centerRows = Math.ceil(Math.sqrt(nodesNeeded));
-    const centerCols = Math.ceil(nodesNeeded / centerRows);
-    
-    const centerWidth = CIRCUIT_AREA.width * 0.7;
-    const centerHeight = availableHeight * 0.7;
-    const centerLeft = CIRCUIT_BOUNDS.left + CIRCUIT_AREA.width * 0.15;
-    const centerTop = CIRCUIT_BOUNDS.top + availableHeight * 0.15;
-    
-    const centerSpacingX = centerWidth / (centerCols + 1);
-    const centerSpacingY = centerHeight / (centerRows + 1);
-    
-    let nodesPlaced = 0;
-    for(let row = 0; row < centerRows && nodesPlaced < nodesNeeded; row++) {
-        for(let col = 0; col < centerCols && nodesPlaced < nodesNeeded; col++) {
-            const x = centerLeft + (col + 1) * centerSpacingX;
-            const y = centerTop + (row + 1) * centerSpacingY;
-            // Add jitter to positions to avoid grid-like appearance
-            nodes.push({x: addJitter(x, centerSpacingX * 0.3), y: addJitter(y, centerSpacingY * 0.3)});
-            nodesPlaced++;
-        }
-    }
-}
-
-// Draw all nodes
-for (let i = 0; i < nodes.length; i++) {
-    epdCircle(nodes[i].x, nodes[i].y, 5, true);
-}
-
-// Draw ground symbol at node 0
-const groundNode = nodes[0];
-const groundX = groundNode.x;
-const groundY = groundNode.y + 30;
-epdLine(groundNode.x, groundNode.y, groundX, groundY);
-epdLine(groundX - 15, groundY, groundX + 15, groundY);
-epdLine(groundX - 10, groundY + 5, groundX + 10, groundY + 5);
-epdLine(groundX - 5, groundY + 10, groundX + 5, groundY + 10);
-
-// Add voltage source between node 1 and ground node
-const sourceX = (nodes[1].x + groundNode.x) / 2;
-const sourceY = (nodes[1].y + groundNode.y) / 2;
-const radius = 25;
-
-epdCircle(sourceX, sourceY, radius, false);
-epdText("+", sourceX - 5, sourceY - 8);
-epdLine(sourceX - 7, sourceY + 8, sourceX + 7, sourceY + 8);
-epdLine(nodes[1].x, nodes[1].y, sourceX - radius, sourceY);
-epdLine(groundNode.x, groundNode.y, sourceX + radius, sourceY);
-
-// Helper function to find a random node pair
-function getRandomNodePair() {
-    const node1 = Math.floor(Math.random() * nodes.length);
-    let node2;
-    do {
-        node2 = Math.floor(Math.random() * nodes.length);
-    } while (node1 === node2);
-    
-    return {node1, node2};
-}
-
-// Draw memristors
-for (let i = 0; i < numMemristors; i++) {
-    const {node1, node2} = getRandomNodePair();
-    const compX = (nodes[node1].x + nodes[node2].x) / 2;
-    const compY = (nodes[node1].y + nodes[node2].y) / 2;
-    
-    // Draw memristor (rectangular with M)
-    const width = 60;
-    const height = 30;
-    
-    epdRect(compX - width/2, compY - height/2, width, height, false);
-    epdText("M", compX - 5, compY - 8);
-    
-    // Draw connecting lines
-    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
-    epdLine(nodes[node2].x, nodes[node2].y, compX + width/2, compY);
-}
-
-// Draw resistors
-for (let i = 0; i < numResistors; i++) {
-    const {node1, node2} = getRandomNodePair();
-    const compX = (nodes[node1].x + nodes[node2].x) / 2;
-    const compY = (nodes[node1].y + nodes[node2].y) / 2;
-    const width = 50;
-    const height = 20;
-    
-    // Draw zigzag resistor
-    const startX = compX - width/2;
-    const endX = compX + width/2;
-    
-    epdLine(nodes[node1].x, nodes[node1].y, startX, compY);
-    epdLine(startX, compY, startX + 5, compY - height/2);
-    epdLine(startX + 5, compY - height/2, startX + 15, compY + height/2);
-    epdLine(startX + 15, compY + height/2, startX + 25, compY - height/2);
-    epdLine(startX + 25, compY - height/2, startX + 35, compY + height/2);
-    epdLine(startX + 35, compY + height/2, startX + 45, compY - height/2);
-    epdLine(startX + 45, compY - height/2, endX, compY);
-    epdLine(endX, compY, nodes[node2].x, nodes[node2].y);
-}
-
-// Draw capacitors
-for (let i = 0; i < numCapacitors; i++) {
-    const {node1, node2} = getRandomNodePair();
-    const compX = (nodes[node1].x + nodes[node2].x) / 2;
-    const compY = (nodes[node1].y + nodes[node2].y) / 2;
-    const width = 40;
-    const plateSpacing = 10;
-    
-    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
-    epdLine(compX - width/2, compY - 15, compX - width/2, compY + 15);
-    epdLine(compX - width/2 + plateSpacing, compY - 15, compX - width/2 + plateSpacing, compY + 15);
-    epdLine(compX - width/2 + plateSpacing, compY, nodes[node2].x, nodes[node2].y);
-}
-
-// Draw inductors
-for (let i = 0; i < numInductors; i++) {
-    const {node1, node2} = getRandomNodePair();
-    const compX = (nodes[node1].x + nodes[node2].x) / 2;
-    const compY = (nodes[node1].y + nodes[node2].y) / 2;
-    const width = 60;
-    const loopRadius = 6;
-    
-    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
-    
-    // Draw loops
-    for (let j = 0; j < 4; j++) {
-        const loopX = compX - width/2 + 10 + j * 15;
-        epdCircle(loopX, compY, loopRadius, false);
-    }
-    
-    epdLine(compX + width/2 - 5, compY, nodes[node2].x, nodes[node2].y);
-}
-
-// Draw diodes
-for (let i = 0; i < numDiodes; i++) {
-    const {node1, node2} = getRandomNodePair();
-    const compX = (nodes[node1].x + nodes[node2].x) / 2;
-    const compY = (nodes[node1].y + nodes[node2].y) / 2;
-    const width = 30;
-    const height = 20;
-    
-    epdLine(nodes[node1].x, nodes[node1].y, compX - width/2, compY);
-    
-    // Triangle
-    epdLine(compX - width/2, compY - height/2, compX - width/2, compY + height/2);
-    epdLine(compX - width/2, compY - height/2, compX + width/2, compY);
-    epdLine(compX - width/2, compY + height/2, compX + width/2, compY);
-    
-    // Line
-    epdLine(compX + width/2, compY - height/2, compX + width/2, compY + height/2);
-    
-    epdLine(compX + width/2, compY, nodes[node2].x, nodes[node2].y);
-}
-
-// Add component counts in the component list section - removing the "COMPONENTS:" title
-const componentStartX = 30;
-const componentStartY = CANVAS_HEIGHT - COMPONENTS_HEIGHT - FOOTER_HEIGHT + 30;
-epdText("MEMRISTORS: " + numMemristors, componentStartX, componentStartY);
-epdText("RESISTORS: " + numResistors, componentStartX, componentStartY + 20);
-epdText("CAPACITORS: " + numCapacitors, componentStartX, componentStartY + 40);
-epdText("INDUCTORS: " + numInductors, componentStartX, componentStartY + 60);
-epdText("DIODES: " + numDiodes, componentStartX, componentStartY + 80);
-
-// Add sample measurements in footer
-const footerY = CANVAS_HEIGHT - FOOTER_HEIGHT + 40;
-epdText("TIME: " + Math.floor(Date.now()/1000) + " s", 30, footerY);
-epdText("SAMPLE: " + (Math.floor(Math.random() * 900) + 100), 30, footerY + 30);`;
-
-            // Update the code editor
-            document.getElementById('code-editor').value = code;
-            // Trigger the preview update
-            updateSketch();
-        }
+        document.getElementById('toggleMirrorBtn').addEventListener('click', function() {
+            Display.mirrorVertical = !Display.mirrorVertical;
+            updateStatus(`Vertical mirroring ${Display.mirrorVertical ? 'enabled' : 'disabled'}`);
+        });
     </script>
 </body>
 </html> 

@@ -10,13 +10,13 @@
 #include <Adafruit_NeoPixel.h>
 
 // LED configuration
-#define RGB_LED 21  // Onboard RGB LED pin
+#define RGB_LED 2  // Changed from pin 21 to pin 2 which is more commonly available on ESP32
 #define HEARTBEAT_INTERVAL 5000  // 5 seconds
 unsigned long lastHeartbeatTime = 0;
 bool initialDisplay = true;  // Flag to track if it's the first display update
 
 // Timer constants and variables
-#define AUTO_REFRESH_TIMEOUT 180000  // 180 seconds (3 minutes) timeout for auto refresh
+#define AUTO_REFRESH_TIMEOUT 120000  // 180 seconds (3 minutes) timeout for auto refresh
 #define CIRCUIT_DISPLAY_TIMEOUT 15000  // 15 seconds to show circuit before switching back
 unsigned long lastUpdateTime = 0;  // Tracks time since last ESP-NOW update
 unsigned long circuitDisplayStartTime = 0;  // Tracks when circuit display was started
@@ -33,6 +33,7 @@ bool displayUpdateRequested = false;
 // Constants for bridge geometry
 // Adjusted for 7.5inch display (800×480)
 const int BRIDGE_GAP = 300;  // Reduced from 500 for smaller display
+const int BRIDGE_GAP_WIDTH = 300; // Width between left and right banks
 const int START_LEFT = 90;   // Reduced from 150
 const int START_RIGHT = 360; // Reduced from 650
 const int START_Y = 240;     // Reduced from 400
@@ -76,7 +77,7 @@ Root roots[NUM_ROOTS];
 Adafruit_NeoPixel pixels(1, RGB_LED, NEO_GRB + NEO_KHZ800);
 
 // Function declarations
-void drawTree(int x, int y, int len, float angle, int depth);
+void drawTree(int x, int y, int len, float angle, int depth, int barkWidth = 1);
 float randomFloat(float min, float max);
 void drawBridgeDisplay();
 void drawChaoticCircuit();
@@ -143,7 +144,9 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
 /* Entry point ----------------------------------------------------------------*/
 void setup()
 {
+    delay(1000);
     Serial.begin(9600);
+    delay(1000);
     
     // Initialize NeoPixel LED
     Serial.println("Initializing LED...");
@@ -176,8 +179,8 @@ void setup()
     pixels.setPixelColor(0, pixels.Color(0, 2, 0));  // Very dim red - GRB format
     pixels.show();
     
-    DEV_Module_Init();
-    
+  DEV_Module_Init();
+
     // Set device as a Wi-Fi Station
     WiFi.mode(WIFI_STA);
     
@@ -611,31 +614,63 @@ void drawBridgeDisplay() {
         initialDisplay = false;
     }
     
+    // Randomize the gap position between original position and left side
+    // Define the range for possible gap positions
+    const int MIN_GAP_POSITION = 50;  // Minimum start position for left bank
+    const int MAX_GAP_POSITION = 150; // Maximum start position for left bank
+    
+    // Define range for gap width
+    const int MIN_GAP_WIDTH = 250;  // Minimum gap width
+    const int MAX_GAP_WIDTH = 350;  // Maximum gap width
+    
+    // Randomly determine the gap position and width
+    const int adjustedStartLeft = random(MIN_GAP_POSITION, MAX_GAP_POSITION);
+    const int randomGapWidth = random(MIN_GAP_WIDTH, MAX_GAP_WIDTH); // Randomize the gap width
+    const int adjustedStartRight = adjustedStartLeft + randomGapWidth; // Variable gap width
+    
+    // Random number of trees on each side (2-5)
+    int numLeftTrees = random(2, 6);
+    int numRightTrees = random(2, 6);
+    
     // Define tree positions and anchor points
     Point leftTrees[5];  // Store left bank tree positions
     Point rightTrees[5]; // Store right bank tree positions
     
-    // Create tree positions - adjusted for smaller display
-    for(int i = 0; i < 5; i++) {
-        // Left bank trees
-        leftTrees[i].x = 10 + i * 30;
+    // Create tree positions - with adjusted gap
+    // Always have at least one tree closest to the bank on each side
+    
+    // Left bank trees - rightmost tree (closest to gap) is always present
+    int leftTreeSpacing = adjustedStartLeft / (numLeftTrees + 1);
+    for(int i = 0; i < numLeftTrees; i++) {
+        leftTrees[i].x = 10 + i * leftTreeSpacing;
         leftTrees[i].y = START_Y;
-        
-        // Right bank trees
-        rightTrees[i].x = 380 + i * 30;
+    }
+    
+    // Right bank trees - leftmost tree (closest to gap) is always present
+    int rightTreeSpacing = 30;
+    for(int i = 0; i < numRightTrees; i++) {
+        // Ensure the leftmost tree of right bank is not above the gap
+        rightTrees[i].x = adjustedStartRight + 20 + i * rightTreeSpacing;
         rightTrees[i].y = START_Y;
     }
     
-    // Draw banks - adjusted for smaller screen
+    // Draw banks - with adjusted positions
     // Left bank
-    Display::rect(0, START_Y, START_LEFT, START_Y + 240, true);    
+    Display::rect(0, START_Y, adjustedStartLeft, START_Y + 240, true);    
     // Right bank
-    Display::rect(START_RIGHT, START_Y, SCREEN_WIDTH, START_Y + 240, true);
+    Display::rect(adjustedStartRight, START_Y, SCREEN_WIDTH, START_Y + 240, true);
     
     // Draw trees on banks
-    for(int i = 0; i < 5; i++) {
-        drawTree(leftTrees[i].x, leftTrees[i].y, 60, -1.57, 4);  // Smaller trees
-        drawTree(rightTrees[i].x, rightTrees[i].y, 60, -1.57, 4);
+    for(int i = 0; i < numLeftTrees; i++) {
+        // Random bark width between 1-3
+        int barkWidth = random(1, 4);
+        drawTree(leftTrees[i].x, leftTrees[i].y, 60, -1.57, 4, barkWidth);
+    }
+    
+    for(int i = 0; i < numRightTrees; i++) {
+        // Random bark width between 1-3
+        int barkWidth = random(1, 4);
+        drawTree(rightTrees[i].x, rightTrees[i].y, 60, -1.57, 4, barkWidth);
     }
     
     // Initialize roots with targets being trees on the opposite bank
@@ -645,15 +680,16 @@ void drawBridgeDisplay() {
         roots[i].thickness = 2 + (i % 3);  // Thinner roots for smaller display
         
         // Choose which tree this root will target (distribute roots among trees)
-        int targetTreeIdx = i % 5;
+        int targetTreeIdx = i % numRightTrees;  // Updated to use variable tree count
         // Choose source tree with better distribution
-        int sourceTreeIdx = (i / 2) % 5;
+        int sourceTreeIdx = (i / 2) % numLeftTrees;  // Updated to use variable tree count
         
         if(i % 2 == 0) {
             // Left side roots
             roots[i].points[0] = {leftTrees[sourceTreeIdx].x, START_Y};
-            roots[i].dirX = 0.95;
-            roots[i].dirY = ((i / 2) % 4 == 0) ? 0.12 : 0.22;
+            roots[i].dirX = 0.98;
+            // Start with very minimal downward slope (almost horizontal)
+            roots[i].dirY = ((i / 2) % 4 == 0) ? 0.15 : 0.2;
             roots[i].targetX = rightTrees[targetTreeIdx].x;
             
             if ((i / 2) % 4 < 2) {
@@ -667,8 +703,9 @@ void drawBridgeDisplay() {
         } else {
             // Right side roots
             roots[i].points[0] = {rightTrees[sourceTreeIdx].x, START_Y};
-            roots[i].dirX = -0.95;
-            roots[i].dirY = ((i / 2) % 4 == 1) ? 0.12 : 0.22;
+            roots[i].dirX = -0.98;
+            // Start with very minimal downward slope (almost horizontal)
+            roots[i].dirY = ((i / 2) % 4 == 1) ? 0.15 : 0.2;
             roots[i].targetX = leftTrees[targetTreeIdx].x;
             
             if ((i / 2) % 4 < 2) {
@@ -681,6 +718,11 @@ void drawBridgeDisplay() {
             roots[i].isLeft = false;
         }
     }
+    
+    // Update the progress across gap calculation to use adjusted positions
+    // ... in the growing loop ...
+    // Determine how far across the gap we are (as a percentage)
+    // When calculating progressAcrossGap, use the adjusted positions:
     
     // Grow the roots
     bool anyGrowing = true;
@@ -701,14 +743,14 @@ void drawBridgeDisplay() {
             float dy = root->targetY - lastPoint->y;
             float distToTarget = sqrt(dx*dx + dy*dy);
             
-            // Determine how far across the gap we are (as a percentage)
+            // Updated to use adjusted positions
             float progressAcrossGap = 0.0;
             if (root->isLeft) {
                 // Left to right progress
-                progressAcrossGap = (lastPoint->x - START_LEFT) / (float)(START_RIGHT - START_LEFT);
+                progressAcrossGap = (lastPoint->x - adjustedStartLeft) / (float)(adjustedStartRight - adjustedStartLeft);
             } else {
                 // Right to left progress
-                progressAcrossGap = (START_RIGHT - lastPoint->x) / (float)(START_RIGHT - START_LEFT);
+                progressAcrossGap = (adjustedStartRight - lastPoint->x) / (float)(adjustedStartRight - adjustedStartLeft);
             }
             
             // Check if we're heading toward the middle or away from it
@@ -718,58 +760,59 @@ void drawBridgeDisplay() {
             }
             
             // Update direction - stronger influence as we get closer to tree
-            float targetInfluence = min(0.5, 0.3 + (1 - distToTarget / 300) * 0.3); // Adjusted distance
+            float targetInfluence = min(0.5, 0.3 + (1 - distToTarget / 300) * 0.3);
             float newDirX = (1 - targetInfluence) * root->dirX + targetInfluence * (dx / distToTarget);
             float newDirY = (1 - targetInfluence) * root->dirY + targetInfluence * (dy / distToTarget);
             
             // Add varied bias based on root index for diversity
-            if (distToTarget > 60 && distToTarget < 240) { // Adjusted distances
-                // Apply stronger downward bias in the middle of the gap
-                float midSectionModifier = 1.0;
-                if (progressAcrossGap > 0.3 && progressAcrossGap < 0.7) {
-                    // Additional downward force in the middle section
-                    midSectionModifier = 3.0;
-                    
-                    // Add extra downward bias
-                    newDirY += 0.3 * midSectionModifier;
-                    
-                    // Ensure newDirY is positive in the middle (downward)
-                    if (newDirY < 0) {
-                        newDirY = 0.2;
-                    }
+            if (distToTarget > 60 && distToTarget < 240) {
+                // Apply a progressive downward bias based on how far across the gap we are
+                float progressFactor = root->isLeft ? progressAcrossGap : (1 - progressAcrossGap);
+                
+                // More gradual bias - starts very small, increases more slowly at first,
+                // then builds up more rapidly in the middle
+                // Uses a modified sigmoid-like curve for more natural appearance
+                float progressiveBias = 0.05 + pow(progressFactor, 1.5) * 0.9; // More gradual start
+                
+                // Apply increasingly more downward force as we progress
+                float biasStrength = 0.1 + progressFactor * 0.5; // Increases with progress
+                newDirY += progressiveBias * biasStrength;
+                
+                // Ensure roots always curve downward but with minimal initial slope
+                if (progressFactor < 0.2) {
+                    // Keep very minimal slope at the beginning
+                    if (newDirY > 0.2) newDirY = 0.2;
+                } else if (progressFactor < 0.5) {
+                    // Gradually allow more downward bias
+                    if (newDirY < 0.1) newDirY = 0.1;
                 } else {
-                    if (i % 4 < 2) {
-                        newDirY += 0.09;
-                    } else {
-                        newDirY += 0.12;
-                    }
-                    
-                    // When heading toward the middle, never allow upward movement
-                    if (headingTowardMiddle && newDirY < 0) {
-                        newDirY = 0.05;
-                    }
+                    // Middle to end section - ensure sufficient downward curve
+                    if (newDirY < 0.2) newDirY = 0.2;
+                }
+                
+                // Different roots should have slightly different behaviors
+                if (i % 4 < 2) {
+                    newDirY += 0.05 * progressFactor; // Scales with progress
+                } else {
+                    newDirY += 0.1 * progressFactor;  // Scales with progress
                 }
             }
             
             // When getting close to target tree, aim upward to climb it
             if (distToTarget < 60) { // Adjusted distance
-                // Only pull upward if near the end, not in the middle section
-                // AND not heading toward the middle
-                if (progressAcrossGap > 0.75 && !headingTowardMiddle) {
-                    // Pull upward to climb the tree
-                    newDirY -= 0.1;
+                // Only pull upward if near the end of the journey and far enough across the gap
+                if ((root->isLeft && progressAcrossGap > 0.75) || (!root->isLeft && progressAcrossGap < 0.25)) {
+                    // Create a smooth transition to climbing 
+                    float climbFactor = 1.0 - (distToTarget / 60.0); // 0 at 60 distance, 1 at 0 distance
+                    
+                    // Pull upward with increasing strength as we get closer
+                    newDirY -= 0.2 * climbFactor;
                 }
             }
             
             // Add random variation (reduced for straighter paths)
             newDirX += randomFloat(-0.02, 0.02);
-            float randY = randomFloat(-0.02, 0.02);
-            
-            // Ensure random variation doesn't cause upward movement when heading to the middle
-            if (headingTowardMiddle || (progressAcrossGap > 0.3 && progressAcrossGap < 0.7)) {
-                // Only allow downward random variation
-                randY = randomFloat(0, 0.03);
-            }
+            float randY = randomFloat(0, 0.03) * progressAcrossGap; // More variation in the middle
             newDirY += randY;
             
             // Normalize direction
@@ -777,9 +820,15 @@ void drawBridgeDisplay() {
             root->dirX = newDirX / len;
             root->dirY = newDirY / len;
             
-            // Final safety check - ensure no upward movement when heading to middle
-            if ((headingTowardMiddle || progressAcrossGap > 0.3 && progressAcrossGap < 0.7) && root->dirY < 0) {
-                root->dirY = abs(root->dirY) * 0.5;
+            // Only enforce minimum slope in the middle sections
+            float minSlope = 0.05 + progressAcrossGap * 0.2; // Gradual increase in minimum slope
+            
+            if (progressAcrossGap > 0.1 && progressAcrossGap < 0.9 && root->dirY < minSlope) {
+                root->dirY = minSlope;
+                // Re-normalize
+                len = sqrt(root->dirX * root->dirX + root->dirY * root->dirY);
+                root->dirX = root->dirX / len;
+                root->dirY = root->dirY / len;
             }
             
             // Calculate new point - shorter steps for smaller display
@@ -855,27 +904,27 @@ void drawBridgeDisplay() {
             if(root->growing && root->numPoints < MAX_POINTS) {
                 root->points[root->numPoints++] = newPoint;
                 
-                // Check growth bounds
-                if((root->isLeft && newPoint.x > START_RIGHT) ||
-                   (!root->isLeft && newPoint.x < START_LEFT) ||
-                   newPoint.y < 40 || newPoint.y > START_Y + 200) { // Adjusted bounds
+                // Updated to use adjusted positions
+                if((root->isLeft && newPoint.x > adjustedStartRight) ||
+                   (!root->isLeft && newPoint.x < adjustedStartLeft) ||
+                   newPoint.y < 40 || newPoint.y > START_Y + 200) {
                     root->growing = false;
                 }
             }
         }
     }
     
-    // Add hanging roots - adjusted for smaller display
+    // Add hanging roots - updated to use adjusted positions
     for(int i = 0; i < NUM_ROOTS; i++) {
         for(int j = 1; j < roots[i].numPoints; j += 2) {
             // Calculate progress across gap
             float progressAcrossGap = 0.0;
             if (roots[i].isLeft) {
                 // Left to right progress
-                progressAcrossGap = (roots[i].points[j].x - START_LEFT) / (float)(START_RIGHT - START_LEFT);
+                progressAcrossGap = (roots[i].points[j].x - adjustedStartLeft) / (float)(adjustedStartRight - adjustedStartLeft);
             } else {
                 // Right to left progress
-                progressAcrossGap = (START_RIGHT - roots[i].points[j].x) / (float)(START_RIGHT - START_LEFT);
+                progressAcrossGap = (adjustedStartRight - roots[i].points[j].x) / (float)(adjustedStartRight - adjustedStartLeft);
             }
             
             // Higher probability and longer hangers in the middle
@@ -901,42 +950,98 @@ void drawBridgeDisplay() {
         }
     }
     
-    // Add climbing tendrils on trees - adjusted for smaller display
+    // Add climbing tendrils on trees
     const int tendrilLength = 12; // Shorter tendrils
     
     // Left tree tendrils
-    for(int i = 0; i < 5; i++) {
-        for(int j = 0; j < 2 + random(0, 2); j++) {
-            int startY = leftTrees[i].y - random(5, 25);
-            int endY = startY - random(10, 20);
+    for(int i = 0; i < numLeftTrees; i++) {
+        for(int j = 0; j < 3 + random(0, 3); j++) { // 3-5 tendrils per tree
+            // Start from random points on the trunk
+            int startY = leftTrees[i].y - random(5, 30);
             
-            // Create wavy pattern
-            int midX1 = leftTrees[i].x + random(3, 7);
-            int midX2 = leftTrees[i].x - random(3, 7);
+            // Always end at the ground
+            int endY = START_Y;
             
-            Display::line(leftTrees[i].x, startY, midX1, startY - tendrilLength/3);
-            Display::line(midX1, startY - tendrilLength/3, midX2, startY - tendrilLength*2/3);
-            Display::line(midX2, startY - tendrilLength*2/3, leftTrees[i].x, endY);
+            // Create more elaborate climbing tendril with multiple segments
+            int numSegments = 3 + random(0, 3); // 3-5 segments
+            int lastX = leftTrees[i].x;
+            int lastY = startY;
+            
+            // Create a meandering path to the ground
+            for (int s = 0; s < numSegments; s++) {
+                // Determine next point - more horizontal movement at the top, more vertical at the bottom
+                float verticalBias = s / (float)numSegments; // Increases as we move down
+                
+                int nextX, nextY;
+                if (s == numSegments - 1) {
+                    // Last segment always reaches the ground
+                    nextX = lastX + random(-8, 8);
+                    nextY = endY;
+                } else {
+                    int horizontalRange = 15 * (1 - verticalBias);
+                    int verticalStep = (endY - startY) / numSegments * (1 + 0.5 * verticalBias);
+                    
+                    nextX = lastX + random(-horizontalRange, horizontalRange);
+                    nextY = lastY + verticalStep;
+                }
+                
+                // Draw this segment with varying thickness
+                int thickness = 1 + (j % 2); // 1-2 pixels thick
+                for (int t = 0; t < thickness; t++) {
+                    Display::line(lastX, lastY + t, nextX, nextY + t);
+                }
+                
+                lastX = nextX;
+                lastY = nextY;
+            }
         }
     }
     
     // Right tree tendrils
-    for(int i = 0; i < 5; i++) {
-        for(int j = 0; j < 2 + random(0, 2); j++) {
-            int startY = rightTrees[i].y - random(5, 25);
-            int endY = startY - random(10, 20);
+    for(int i = 0; i < numRightTrees; i++) {
+        for(int j = 0; j < 3 + random(0, 3); j++) { // 3-5 tendrils per tree
+            // Start from random points on the trunk
+            int startY = rightTrees[i].y - random(5, 30);
             
-            // Create wavy pattern
-            int midX1 = rightTrees[i].x - random(3, 7);
-            int midX2 = rightTrees[i].x + random(3, 7);
+            // Always end at the ground
+            int endY = START_Y;
             
-            Display::line(rightTrees[i].x, startY, midX1, startY - tendrilLength/3);
-            Display::line(midX1, startY - tendrilLength/3, midX2, startY - tendrilLength*2/3);
-            Display::line(midX2, startY - tendrilLength*2/3, rightTrees[i].x, endY);
+            // Create more elaborate climbing tendril with multiple segments
+            int numSegments = 3 + random(0, 3); // 3-5 segments
+            int lastX = rightTrees[i].x;
+            int lastY = startY;
+            
+            // Create a meandering path to the ground
+            for (int s = 0; s < numSegments; s++) {
+                // Determine next point - more horizontal movement at the top, more vertical at the bottom
+                float verticalBias = s / (float)numSegments; // Increases as we move down
+                
+                int nextX, nextY;
+                if (s == numSegments - 1) {
+                    // Last segment always reaches the ground
+                    nextX = lastX + random(-8, 8);
+                    nextY = endY;
+                } else {
+                    int horizontalRange = 15 * (1 - verticalBias);
+                    int verticalStep = (endY - startY) / numSegments * (1 + 0.5 * verticalBias);
+                    
+                    nextX = lastX + random(-horizontalRange, horizontalRange);
+                    nextY = lastY + verticalStep;
+                }
+                
+                // Draw this segment with varying thickness
+                int thickness = 1 + (j % 2); // 1-2 pixels thick
+                for (int t = 0; t < thickness; t++) {
+                    Display::line(lastX, lastY + t, nextX, nextY + t);
+                }
+                
+                lastX = nextX;
+                lastY = nextY;
+            }
         }
     }
     
-    // Ensure all roots are connected - create connections for any unconnected roots
+    // Ensure all roots are connected - use adjusted positions
     for(int i = 0; i < NUM_ROOTS; i++) {
         if(!connected[i] && roots[i].numPoints > 0) {
             // Find the closest root or tree from the opposite side to connect to
@@ -1002,13 +1107,18 @@ void drawBridgeDisplay() {
     displayUpdateRequested = false;
 }
 
-// Function to create a subtle heartbeat effect on the LED
+// Function to create a subtle heartbeat effect on the LED - enhanced brightness
 void heartbeatLED() {
+    // Debug info
+    Serial.println("Heartbeat LED...");
+    
+    // Increased brightness values
+    
     // First pulse
-    pixels.setPixelColor(0, pixels.Color(0, 20, 0));  // GRB format: Red
+    pixels.setPixelColor(0, pixels.Color(0, 100, 0));  // GRB format: Red - increased brightness
     pixels.show();
     delay(50);
-    pixels.setPixelColor(0, pixels.Color(0, 100, 0));  // Brighter red
+    pixels.setPixelColor(0, pixels.Color(0, 200, 0));  // Brighter red - increased brightness
     pixels.show();
     delay(100);
     pixels.setPixelColor(0, pixels.Color(0, 0, 0));   // Off
@@ -1016,17 +1126,17 @@ void heartbeatLED() {
     delay(100);
     
     // Second pulse (stronger)
-    pixels.setPixelColor(0, pixels.Color(0, 30, 0));  // Medium red
+    pixels.setPixelColor(0, pixels.Color(0, 150, 0));  // Medium red - increased brightness
     pixels.show();
     delay(50);
-    pixels.setPixelColor(0, pixels.Color(0, 150, 0)); // Bright red
+    pixels.setPixelColor(0, pixels.Color(0, 255, 0)); // Bright red - maximum brightness
     pixels.show();
     delay(100);
     pixels.setPixelColor(0, pixels.Color(0, 0, 0));   // Off
     pixels.show();
     
     // Set very dim red for normal operation
-    pixels.setPixelColor(0, pixels.Color(0, 2, 0));  // Very dim red - GRB format
+    pixels.setPixelColor(0, pixels.Color(0, 10, 0));  // Very dim red - increased from 2 to 10
     pixels.show();
 }
 
@@ -1066,17 +1176,38 @@ void flashLEDOnTransmission() {
     pixels.show();
 }
 
-void drawTree(int x, int y, int len, float angle, int depth) {
+void drawTree(int x, int y, int len, float angle, int depth, int barkWidth) {
     if (depth <= 0) return;
     
     int endX = x + len * cos(angle);
     int endY = y + len * sin(angle);
-    Display::line(x, y, endX, endY);
+    
+    // Draw the line with the specified bark width
+    for (int i = 0; i < barkWidth; i++) {
+        int offsetX = i/2 * (i % 2 == 0 ? -1 : 1);
+        Display::line(x + offsetX, y, endX + offsetX, endY);
+    }
     
     if (depth > 1) {
-        int newLen = len * 0.7;
-        drawTree(endX, endY, newLen, angle - 0.5, depth - 1);
-        drawTree(endX, endY, newLen, angle + 0.5, depth - 1);
+        // Reduce bark width as we go up the tree
+        int newBarkWidth = max(1, barkWidth - 1);
+        
+        // Calculate new length with some random variation
+        int newLen = len * (0.65 + randomFloat(0, 0.1));
+        
+        // Create more diverse branching patterns
+        float leftAngle = angle - (0.4 + randomFloat(0, 0.2));
+        float rightAngle = angle + (0.4 + randomFloat(0, 0.2));
+        
+        // Sometimes add a middle branch for more diversity
+        if (depth > 2 && random(100) < 30) {
+            float middleAngle = angle + randomFloat(-0.1, 0.1);
+            drawTree(endX, endY, newLen, middleAngle, depth - 1, newBarkWidth);
+        }
+        
+        // Draw left and right branches
+        drawTree(endX, endY, newLen, leftAngle, depth - 1, newBarkWidth);
+        drawTree(endX, endY, newLen, rightAngle, depth - 1, newBarkWidth);
     }
 }
 
